@@ -12,18 +12,18 @@ body {
 .jumbotron {
   padding-top: 0px;
   padding-bottom: 0px;
-  margin-bottom: 0px;
-  background-color: #333;
+  margin-bottom: 50px;
 }
 
 /* landing specific styles */
 
+.jumbotron {
+  height: 600px;
+  background: #eee;
+}
 .footer {
   width: 100%;
   padding: 20px 0;
-  position: absolute;
   height: 60px;
   background-color: #eee;
-  bottom: 0;
-
 }
