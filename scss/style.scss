@@ -1,5 +1,6 @@
 @import "bootstrap";
 /* override Bootstrap defaults */
+
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
@@ -12,6 +13,7 @@ body {
   padding-bottom: 0;
   margin-bottom: 50px;
 }
+
 /* landing specific styles */
 .jumbotron {
   height: 600px;
@@ -22,12 +24,85 @@ body {
   padding: 20px 0;
   height: $footer-height;
   background-color: $brand-primary;
-  color: $white;
-  .links {
+  color: lighten($brand-primary, 40%);
+  margin-top: 80px;
+
+  a.links {
     padding: 0 $padding-small-horizontal;
-    color: $white;
+    color: lighten($brand-primary, 40%);
     &:last-child {
       padding-right: 0;
     }
+    &:hover {
+      color: $white;
+      text-decoration: none;
+    }
+  }
+}
+
+
+/* MARKETING CONTENT
+-------------------------------------------------- */
+
+/* Center align the text within the three columns below the carousel */
+.marketing .col-lg-4 {
+  margin-bottom: 20px;
+  text-align: center;
+}
+.marketing h2 {
+  font-weight: normal;
+}
+.marketing .col-lg-4 p {
+  margin-right: 20px;
+  margin-left: 20px;
+  padding: $padding-large-vertical;
+}
+
+
+/* features
+------------------------- */
+
+.feature-divider {
+  margin: 80px 0; /* Space out the Bootstrap <hr> more */
+}
+
+
+/* RESPONSIVE CSS
+-------------------------------------------------- */
+
+@media (min-width: 768px) {
+  /* Navbar positioning foo */
+  .navbar-wrapper {
+    margin-top: 20px;
+  }
+  .navbar-wrapper .container {
+    padding-right: 15px;
+    padding-left: 15px;
+  }
+  .navbar-wrapper .navbar {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  /* The navbar becomes detached from the top, so we round the corners */
+  .navbar-wrapper .navbar {
+    border-radius: 4px;
+  }
+
+  /* Bump up size of carousel content */
+  .carousel-caption p {
+    margin-bottom: 20px;
+    font-size: 21px;
+    line-height: 1.4;
+  }
+
+  .feature-heading {
+    font-size: 50px;
+  }
+}
+
+@media (min-width: 992px) {
+  .feature-heading {
+    margin-top: 120px;
   }
 }
