@@ -1,24 +1,18 @@
-@import "bootstrap/variables";
-
+@import "bootstrap";
 /* override Bootstrap defaults */
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
 }
-
 .navbar {
   margin-bottom: 0;
 }
-
 .jumbotron {
-  padding-top: 0px;
-  padding-bottom: 0px;
+  padding-top: 0;
+  padding-bottom: 0;
   margin-bottom: 50px;
 }
-
-
 /* landing specific styles */
-
 .jumbotron {
   height: 600px;
   background: #eee;
@@ -29,9 +23,11 @@ body {
   height: $footer-height;
   background-color: $brand-primary;
   color: $white;
-    a{
-      color: $white;
+  .links {
+    padding: 0 $padding-small-horizontal;
+    color: $white;
+    &:last-child {
+      padding-right: 0;
     }
+  }
 }
-
-/* rubbish */
