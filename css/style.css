@@ -4062,14 +4062,14 @@ tbody.collapse.in {
   background-color: #493762;
   border-color: #312541; }
   .navbar-inverse .navbar-brand {
-    color: #cabeda; }
+    color: #e4deed; }
     .navbar-inverse .navbar-brand:hover, .navbar-inverse .navbar-brand:focus {
       color: #fff;
       background-color: transparent; }
   .navbar-inverse .navbar-text {
     color: #FFF; }
   .navbar-inverse .navbar-nav > li > a {
-    color: #cabeda; }
+    color: #e4deed; }
     .navbar-inverse .navbar-nav > li > a:hover, .navbar-inverse .navbar-nav > li > a:focus {
       color: #fff;
       background-color: transparent; }
@@ -4097,7 +4097,7 @@ tbody.collapse.in {
     .navbar-inverse .navbar-nav .open .dropdown-menu .divider {
       background-color: #312541; }
     .navbar-inverse .navbar-nav .open .dropdown-menu > li > a {
-      color: #cabeda; }
+      color: #e4deed; }
       .navbar-inverse .navbar-nav .open .dropdown-menu > li > a:hover, .navbar-inverse .navbar-nav .open .dropdown-menu > li > a:focus {
         color: #fff;
         background-color: transparent; }
@@ -4108,11 +4108,11 @@ tbody.collapse.in {
       color: #444;
       background-color: transparent; } }
   .navbar-inverse .navbar-link {
-    color: #cabeda; }
+    color: #e4deed; }
     .navbar-inverse .navbar-link:hover {
       color: #fff; }
   .navbar-inverse .btn-link {
-    color: #cabeda; }
+    color: #e4deed; }
     .navbar-inverse .btn-link:hover, .navbar-inverse .btn-link:focus {
       color: #fff; }
     .navbar-inverse .btn-link[disabled]:hover, .navbar-inverse .btn-link[disabled]:focus, fieldset[disabled] .navbar-inverse .btn-link:hover, fieldset[disabled] .navbar-inverse .btn-link:focus {
@@ -5909,16 +5909,15 @@ body {
   width: 100%;
   padding: 20px 0;
   height: 60px;
-  background-color: #493762;
-  color: #af9dc8;
+  color: #777777;
   margin-top: 80px; }
   .footer a.links {
     padding: 0 10px;
-    color: #af9dc8; }
+    color: #777777; }
     .footer a.links:last-child {
       padding-right: 0; }
     .footer a.links:hover {
-      color: #FFF;
+      color: #a2a2a2;
       text-decoration: none; }
 
 /* MARKETING CONTENT

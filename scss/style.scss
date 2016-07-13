@@ -23,18 +23,17 @@ body {
   width: 100%;
   padding: 20px 0;
   height: $footer-height;
-  background-color: $brand-primary;
-  color: lighten($brand-primary, 40%);
+  color: $gray-light;
   margin-top: 80px;
 
   a.links {
     padding: 0 $padding-small-horizontal;
-    color: lighten($brand-primary, 40%);
+    color: $gray-light;
     &:last-child {
       padding-right: 0;
     }
     &:hover {
-      color: $white;
+      color: lighten($gray, 30%);
       text-decoration: none;
     }
   }
