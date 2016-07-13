@@ -1,0 +1,22 @@
+/* flex row */
+.flex-row {
+  display:  flex;
+  flex-direction: row;
+    /* align-items: flex-end; */
+}
+
+/* bigger portion use this */
+.flex-grow {
+  flex: 0 0 auto;
+}
+
+/* smaller portion use this */
+.flex-shrink {
+  flex: 1 1 auto;
+}
+
+/* Note: flex: grow shrink flex-basis */
+
+.align-self {
+  align-self: center;
+}

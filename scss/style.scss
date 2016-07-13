@@ -1,28 +1,37 @@
+@import "bootstrap/variables";
+
 /* override Bootstrap defaults */
 body {
   font-family: 'Lato', sans-serif;
-  font-weight: 300; }
+  font-weight: 300;
+}
 
 .navbar {
-  margin-bottom: 0; }
+  margin-bottom: 0;
+}
 
 .jumbotron {
   padding-top: 0px;
   padding-bottom: 0px;
-  margin-bottom: 50px; }
+  margin-bottom: 50px;
+}
+
 
 /* landing specific styles */
+
 .jumbotron {
   height: 600px;
-  background: #eee; }
-
+  background: #eee;
+}
 .footer {
   width: 100%;
   padding: 20px 0;
-  height: 60px;
-  background-color: #493762;
-  color: #FFF; }
-  .footer a {
-    color: #FFF; }
+  height: $footer-height;
+  background-color: $brand-primary;
+  color: $white;
+    a{
+      color: $white;
+    }
+}
 
 /* rubbish */
