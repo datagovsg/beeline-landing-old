@@ -1,0 +1,29 @@
+/* base */
+body {
+  font-family: 'Lato', sans-serif;
+  font-weight: 300;
+}
+
+/* override Bootstrap defaults */
+.navbar {
+  margin-bottom: 0;
+}
+
+.jumbotron {
+  padding-top: 0px;
+  padding-bottom: 0px;
+  margin-bottom: 0px;
+  background-color: #333;
+}
+
+/* landing specific styles */
+
+.footer {
+  width: 100%;
+  padding: 20px 0;
+  position: absolute;
+  height: 60px;
+  background-color: #eee;
+  bottom: 0;
+
+}
