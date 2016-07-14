@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="26px" height="24px" viewBox="0 0 26 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <!-- Generator: Sketch 3.8.3 (29802) - http://www.bohemiancoding.com/sketch -->
+    <title>Icon_Dependable</title>
+    <desc>Created with Sketch.</desc>
+    <defs></defs>
+    <g id="Page-2" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <g id="Desktop" transform="translate(-187.000000, -429.000000)">
+            <g id="Icon_Dependable" transform="translate(187.000000, 429.000000)">
+                <path d="M21,23 C21,23 17,18.209 17,16 C17,13.791 18.79,12 21,12 C23.21,12 25,13.791 25,16 C25,18.209 21,23 21,23 Z" id="Stroke-204" stroke="#38FDC8" fill="#44FCC9"></path>
+                <g id="Group" stroke="#493B5E">
+                    <path d="M7.5,5.5 L7.5,21.5" id="Stroke-198"></path>
+                    <path d="M14.5,10.5 L14.5,0.5" id="Stroke-200"></path>
+                    <polyline id="Stroke-202" points="13.5 17.2144 7.5 21.5004 0.5 16.5004 0.5 0.5004 7.5 5.5004 14.5 0.5004 21.5 5.5004 21.5 10.5004"></polyline>
+                    <path d="M23.5,16.5 C23.5,18.709 19.5,23.5 19.5,23.5 C19.5,23.5 15.5,18.709 15.5,16.5 C15.5,14.291 17.29,12.5 19.5,12.5 C21.71,12.5 23.5,14.291 23.5,16.5 L23.5,16.5 Z" id="Stroke-204"></path>
+                    <path d="M21,16.5 C21,17.329 20.328,18 19.5,18 C18.671,18 18,17.329 18,16.5 C18,15.671 18.671,15 19.5,15 C20.328,15 21,15.671 21,16.5 L21,16.5 Z" id="Stroke-206"></path>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
