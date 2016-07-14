@@ -1069,7 +1069,7 @@ html {
   -webkit-tap-highlight-color: transparent; }
 
 body {
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Lato", Helvetica, Arial, sans-serif;
   font-size: 15px;
   line-height: 1.6666666667;
   color: #333333;
@@ -4059,8 +4059,8 @@ tbody.collapse.in {
       color: #ccc; }
 
 .navbar-inverse {
-  background-color: #493762;
-  border-color: #312541; }
+  background-color: #312541;
+  border-color: #181221; }
   .navbar-inverse .navbar-brand {
     color: #e4deed; }
     .navbar-inverse .navbar-brand:hover, .navbar-inverse .navbar-brand:focus {
@@ -4075,7 +4075,7 @@ tbody.collapse.in {
       background-color: transparent; }
   .navbar-inverse .navbar-nav > .active > a, .navbar-inverse .navbar-nav > .active > a:hover, .navbar-inverse .navbar-nav > .active > a:focus {
     color: #fff;
-    background-color: #312541; }
+    background-color: #181221; }
   .navbar-inverse .navbar-nav > .disabled > a, .navbar-inverse .navbar-nav > .disabled > a:hover, .navbar-inverse .navbar-nav > .disabled > a:focus {
     color: #444;
     background-color: transparent; }
@@ -4087,15 +4087,15 @@ tbody.collapse.in {
       background-color: #fff; }
   .navbar-inverse .navbar-collapse,
   .navbar-inverse .navbar-form {
-    border-color: #382a4b; }
+    border-color: #20182a; }
   .navbar-inverse .navbar-nav > .open > a, .navbar-inverse .navbar-nav > .open > a:hover, .navbar-inverse .navbar-nav > .open > a:focus {
-    background-color: #312541;
+    background-color: #181221;
     color: #fff; }
   @media (max-width: 767px) {
     .navbar-inverse .navbar-nav .open .dropdown-menu > .dropdown-header {
-      border-color: #312541; }
+      border-color: #181221; }
     .navbar-inverse .navbar-nav .open .dropdown-menu .divider {
-      background-color: #312541; }
+      background-color: #181221; }
     .navbar-inverse .navbar-nav .open .dropdown-menu > li > a {
       color: #e4deed; }
       .navbar-inverse .navbar-nav .open .dropdown-menu > li > a:hover, .navbar-inverse .navbar-nav .open .dropdown-menu > li > a:focus {
@@ -4103,7 +4103,7 @@ tbody.collapse.in {
         background-color: transparent; }
     .navbar-inverse .navbar-nav .open .dropdown-menu > .active > a, .navbar-inverse .navbar-nav .open .dropdown-menu > .active > a:hover, .navbar-inverse .navbar-nav .open .dropdown-menu > .active > a:focus {
       color: #fff;
-      background-color: #312541; }
+      background-color: #181221; }
     .navbar-inverse .navbar-nav .open .dropdown-menu > .disabled > a, .navbar-inverse .navbar-nav .open .dropdown-menu > .disabled > a:hover, .navbar-inverse .navbar-nav .open .dropdown-menu > .disabled > a:focus {
       color: #444;
       background-color: transparent; } }
@@ -4401,7 +4401,7 @@ a.badge:hover, a.badge:focus {
         padding-right: 60px; }
       .jumbotron h1,
       .jumbotron .h1 {
-        font-size: 68px; } }
+        font-size: 45px; } }
 
 .thumbnail {
   display: block;
@@ -5263,7 +5263,7 @@ button.close {
   position: absolute;
   z-index: 1070;
   display: block;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Lato", Helvetica, Arial, sans-serif;
   font-style: normal;
   font-weight: normal;
   letter-spacing: normal;
@@ -5369,7 +5369,7 @@ button.close {
   display: none;
   max-width: 276px;
   padding: 1px;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Lato", Helvetica, Arial, sans-serif;
   font-style: normal;
   font-weight: normal;
   letter-spacing: normal;
@@ -5890,7 +5890,8 @@ button.close {
 /* override Bootstrap defaults */
 body {
   font-family: 'Lato', sans-serif;
-  font-weight: 300; }
+  font-weight: 300;
+  margin-top: 60px; }
 
 .navbar {
   margin-bottom: 0; }
@@ -5903,14 +5904,39 @@ body {
 /* landing specific styles */
 .jumbotron {
   height: 600px;
-  background: #eee; }
+  color: #eeeeee;
+  background: url("../images/background.png");
+  background-size: cover;
+  background-repeat: no-repeat;
+  line-height: 1.5;
+  padding: 80px;
+  /* background: #402960; Old browsers
+  background: -moz-linear-gradient(45deg,  #402960 20%, #7cffc0 100%); FF3.6-15
+  background: -webkit-linear-gradient(45deg,  #402960 20%,#7cffc0 100%); Chrome10-25,Safari5.1-6
+  background: linear-gradient(45deg,  #402960 20%,#7cffc0 100%); W3C, IE10+, FF16+, Chrome26+, Opera12+, Safari7+
+  filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#402960', endColorstr='#7cffc0',GradientType=1 ); IE6-9 fallback on horizontal gradient  */ }
+  .jumbotron .jumbocontent {
+    margin: 10px 0; }
+
+.nohand {
+  position: absolute;
+  background: url("../images/nohands.png");
+  background-repeat: no-repeat;
+  height: 800px;
+  width: 618px;
+  right: 0; }
+
+.app-badge {
+  margin-right: 16px; }
+  .app-badge:hover {
+    opacity: 0.8; }
 
 .footer {
   width: 100%;
   padding: 20px 0;
   height: 60px;
   color: #777777;
-  margin-top: 80px; }
+  margin-top: 120px; }
   .footer a.links {
     padding: 0 10px;
     color: #777777; }
@@ -5920,54 +5946,57 @@ body {
       color: #a2a2a2;
       text-decoration: none; }
 
-/* MARKETING CONTENT
--------------------------------------------------- */
 /* Center align the text within the three columns below the carousel */
-.marketing .col-lg-4 {
-  margin-bottom: 20px;
-  text-align: center; }
+.marketing {
+  margin-top: 80px;
+  margin-bottom: 80px; }
+  .marketing .col-lg-4 {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    text-align: center; }
+  .marketing h1 {
+    text-align: center;
+    margin-bottom: 60px; }
+  .marketing h3 {
+    font-weight: normal; }
+  .marketing .col-lg-4 p {
+    margin-right: 40px;
+    margin-left: 40px;
+    padding: 0 10px; }
 
-.marketing h2 {
-  font-weight: normal; }
-
-.marketing .col-lg-4 p {
-  margin-right: 20px;
-  margin-left: 20px;
-  padding: 10px; }
-
-/* features
-------------------------- */
 .feature-divider {
   margin: 80px 0;
   /* Space out the Bootstrap <hr> more */ }
 
-/* RESPONSIVE CSS
+/* Responsive CSS
 -------------------------------------------------- */
 @media (min-width: 768px) {
-  /* Navbar positioning foo */
-  .navbar-wrapper {
-    margin-top: 20px; }
-
-  .navbar-wrapper .container {
-    padding-right: 15px;
-    padding-left: 15px; }
-
-  .navbar-wrapper .navbar {
-    padding-right: 0;
-    padding-left: 0; }
-
-  /* The navbar becomes detached from the top, so we round the corners */
-  .navbar-wrapper .navbar {
-    border-radius: 4px; }
-
-  /* Bump up size of carousel content */
-  .carousel-caption p {
-    margin-bottom: 20px;
-    font-size: 21px;
-    line-height: 1.4; }
-
+  /* Bump up size of feature-heading */
   .feature-heading {
-    font-size: 50px; } }
+    font-size: 45px; }
+
+  .hand {
+    position: absolute;
+    background: url("../images/beelineApp2.png");
+    background-repeat: no-repeat;
+    height: 829px;
+    width: 698px; } }
 @media (min-width: 992px) {
   .feature-heading {
-    margin-top: 120px; } }
+    margin-top: 120px; }
+
+  .hand {
+    position: absolute;
+    background: url("../images/beelineApp2.png");
+    background-repeat: no-repeat;
+    height: 829px;
+    width: 698px;
+    right: -100px; } }
+@media (min-width: 1442px) {
+  .hand {
+    position: absolute;
+    background: url("../images/beelineApp2.png");
+    background-repeat: no-repeat;
+    height: 829px;
+    width: 698px;
+    right: 0; } }
