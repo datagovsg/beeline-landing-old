@@ -15,7 +15,7 @@ body {
 }
 /* landing specific styles */
 .jumbotron {
-  height: 600px;
+  height: 800px;
   color: $gray-lighter;
   background: url("../images/background.png");
   background-size: cover;
@@ -29,6 +29,14 @@ body {
   filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#402960', endColorstr='#7cffc0',GradientType=1 ); IE6-9 fallback on horizontal gradient  */
   .jumbocontent {
     margin: 10px 0;
+  }
+  .reminder{
+      padding: $padding-small-horizontal 0;
+      color: darken($gray-lighter, 20%);
+      font-size: $font-size-small;
+    .fa-refresh {
+      padding-right: $padding-small-horizontal;
+    }
   }
 }
 .nohand {
@@ -48,9 +56,7 @@ body {
 .footer {
   width: 100%;
   padding: 20px 0;
-  height: $footer-height;
   color: $gray-light;
-  margin-top: 120px;
   a.links {
     padding: 0 $padding-small-horizontal;
     color: $gray-light;
@@ -91,6 +97,12 @@ body {
   margin: $landing-margin 0;
   /* Space out the Bootstrap <hr> more */
 }
+
+.partners {
+  img {
+    margin: 40px auto;
+  }
+}
 /* Responsive CSS
 -------------------------------------------------- */
 @media (min-width: 768px) {
@@ -108,7 +120,7 @@ body {
 }
 @media (min-width: 992px) {
   .feature-heading {
-    margin-top: 120px;
+    margin-top: $landing-margin;
   }
   .hand {
     position: absolute;
@@ -130,3 +142,7 @@ body {
       right: 0;
     }
   }
+
+.gray {
+  background-color: $gray;
+}
