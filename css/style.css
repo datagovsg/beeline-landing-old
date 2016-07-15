@@ -5904,7 +5904,7 @@ body {
 
 /* landing specific styles */
 .jumbotron {
-  height: 800px;
+  height: 700px;
   color: #eeeeee;
   background: url("../images/background.png");
   background-size: cover;
@@ -5938,6 +5938,9 @@ body {
   margin-right: 16px; }
   .app-badge:hover {
     opacity: 0.8; }
+
+.webapp {
+  width: 420px; }
 
 .footer {
   width: 100%;

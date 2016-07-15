@@ -16,7 +16,7 @@ body {
 }
 /* landing specific styles */
 .jumbotron {
-  height: 800px;
+  height: 700px;
   color: $gray-lighter;
   background: url("../images/background.png");
   background-size: cover;
@@ -56,6 +56,10 @@ body {
   &:hover {
     opacity: 0.8;
   }
+}
+
+.webapp {
+  width: 420px;
 }
 .footer {
   width: 100%;
