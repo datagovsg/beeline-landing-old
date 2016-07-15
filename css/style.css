@@ -5890,7 +5890,8 @@ button.close {
 /* override Bootstrap defaults */
 body {
   font-family: 'Lato', sans-serif;
-  font-weight: 300; }
+  font-weight: 300;
+  overflow-x: hidden; }
 
 .navbar {
   margin-bottom: 0;
@@ -5916,18 +5917,20 @@ body {
     flex-direction: row;
     align-items: center;
     height: 100%; }
-    .jumbotron .container .appBadgeBtn:hover {
-      opacity: 0.8; }
+    .jumbotron .container .row {
+      padding: 5px 0px; }
     .jumbotron .container .appBadgeBtn img {
-      max-width: 280px;
+      max-width: 300px;
       max-height: 80px;
-      margin-bottom: 20px; }
+      margin-bottom: 10px; }
+      .jumbotron .container .appBadgeBtn img:hover {
+        box-shadow: 0 0 10px #eeeeee;
+        border-radius: 10px; }
     .jumbotron .container .webApp {
-      height: 60px;
       margin-bottom: 20px;
       vertical-align: middle; }
       .jumbotron .container .webApp.btn-lg, .jumbotron .container .btn-group-lg > .webApp.btn {
-        padding: 12px 20px; }
+        padding: 10px 30px; }
     .jumbotron .container .reminder {
       color: #bbbbbb;
       font-size: 16px; }

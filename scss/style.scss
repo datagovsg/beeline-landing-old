@@ -3,6 +3,7 @@
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
+  overflow-x: hidden;
 }
 .navbar {
   margin-bottom: 0;
@@ -32,24 +33,26 @@ body {
     align-items: center;
     height: 100%;
 
+    .row {
+      padding: 5px 0px;
+    }
     .appBadgeBtn{
-      &:hover{
-        opacity: 0.8;
-      }
       img{
-          max-width: 280px;
+          max-width: 300px;
           max-height: 80px;
-          margin-bottom: $padding-small-horizontal*2;
+          margin-bottom: $padding-small-horizontal;
+          &:hover{
+            box-shadow: 0 0 10px $gray-lighter;
+            border-radius: $border-radius-large;
+          }
       }
     }
 
-
     .webApp{
-      height: 60px;
       margin-bottom: $padding-small-horizontal*2;
       vertical-align: middle;
       &.btn-lg{
-        padding: 12px 20px;
+        padding: 10px 30px;
       }
     }
 
