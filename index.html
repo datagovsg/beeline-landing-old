@@ -32,16 +32,16 @@
 
 <body>
   <!-- Static navbar -->
-  <nav class="navbar navbar-inverse navbar-fixed-top">
+  <nav class="navbar navbar-static-top navbar-inverse">
     <div class="container">
       <div class="navbar-header">
-        <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+        <!-- <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
           <span class="sr-only">Toggle navigation</span>
           <span class="icon-bar"></span>
           <span class="icon-bar"></span>
           <span class="icon-bar"></span>
-        </button>
-        <a class="navbar-brand" href="#">Beeline.sg<!-- <img class="brand" alt="Brand" src="images/beeline.svg" width="30"> --></a>
+        </button> -->
+        <a class="navbar-brand" href="#">Beeline Singapore</a>
       </div>
       <div id="navbar" class="navbar-collapse collapse">
         <ul class="nav navbar-nav navbar-right">
@@ -50,7 +50,7 @@
           <li><a href="../navbar-fixed-top/">Ride</a></li>
           <li><a href="../navbar-fixed-top/">About</a></li> -->
           <li><a class="link"><span class="fa-lg">
-              <i class="fa fa-facebook-square "></i>
+              <i class="fa fa-facebook-square"></i>
               </span></a>
           </li>
         </ul>
@@ -59,25 +59,35 @@
   </nav>
   <div class="jumbotron">
     <div class="container">
-      <div class="row flex-container wow fadeIn">
         <div class="hand wow fadeInRight"></div>
-        <div class="col-lg-8 col-md-12 col-sm-12 jumbocontent">
-          <h1>Introducing the new Beeline app</h1>
+      <div class="wow fadeIn">
+        <div class="row">
+          <div class="col-lg-8 col-md-12 col-sm-12">
+            <h1>Introducing the new Beeline app</h1>
+          </div>
+          <div class="col-lg-6 col-md-6 col-sm-12">
+            <p>Download and update to the latest Beeline app to book seats on a direct shuttle to your destination. Experience a faster app and a more seamless commute.</p>
+          </div>
         </div>
-        <div class="col-md-6 col-md-6 col-sm-12 jumbocontent">
-          <p>Download and update to the latest Beeline app to book seats on a direct shuttle to your destination. Experience a faster app and a more seamless commute.</p>
+        <div class="row">
+          <div class="col-lg-3 col-md-3 col-sm-4 text-center">
+            <a class="appBadgeBtn" href='https://play.google.com/store/apps/details?id=sg.beeline&utm_source=global_co&utm_medium=prtnr&utm_content=Mar2515&utm_campaign=PartBadge&pcampaignid=MKT-Other-global-all-co-prtnr-py-PartBadge-Mar2515-1'><img class="img-responsive center-block"alt='Get it on Google Play' src='images/badge_googlePlay.svg'/></a>
+          </div>
+          <div class="col-lg-3 col-md-3 col-sm-4 text-center">
+            <a class="appBadgeBtn" href='https://itunes.apple.com/sg/app/beeline-sg/id1010615256?ls=1&mt=8'><img class="img-responsive center-block" alt='Download on the App Store' src='images/badge_itunes.svg'/></a>
+          </div>
         </div>
-        <div class="col-md-6 col-md-8 col-sm-12 jumbocontent">
-          <a class="app-badge" href='https://play.google.com/store/apps/details?id=sg.beeline&utm_source=global_co&utm_medium=prtnr&utm_content=Mar2515&utm_campaign=PartBadge&pcampaignid=MKT-Other-global-all-co-prtnr-py-PartBadge-Mar2515-1'><img alt='Get it on Google Play' src='images/beeline_google_play.svg' width="200px" /></a>
-          <a class="app-badge" href='https://itunes.apple.com/sg/app/beeline-sg/id1010615256?ls=1&mt=8'><img alt='Download on the App Store' src='images/beeline_itunes.svg' width="200px" /></a>
+        <div class="row">
+          <div class="col-lg-3 col-md-3 col-sm-12 text-center">
+            <a class="btn btn-lg btn-default btn-outline webApp" href='https://app.beeline.sg'>Go to the mobile web version</a>
+          </div>
         </div>
-        <div class="col-md-6 col-md-8 col-sm-12 jumbocontent">
-          <a class="btn btn-lg btn-default btn-outline webapp" href='https://app.beeline.sg'>Go to the mobile web version</a>
-        </div>
-        <div class="col-md-6 col-md-8 col-sm-12 jumbocontent">
-          <p class="reminder">
-            <i class="fa fa-refresh" aria-hidden="true"></i>Kindly update your Beeline app if you are unable to book for the month of August.
-          </p>
+        <div class="row">
+          <div class="col-md-6 col-md-8 col-sm-12">
+            <p class="reminder">
+              <i class="fa fa-refresh" aria-hidden="true"></i>Kindly update your Beeline app if you are unable to book for the month of August.
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -90,7 +100,7 @@
         <p>Book a seat on buses listed by private bus operators. If there are no routes suitable, suggest! New routes are activated by community demand. On the day of your ride, you will be able to track the bus you booked. Beeline app is availble on iOS, Android and mobile web. </p>
       </div>
       <div class="col-md-5 col-md-pull-7 wow fadeInLeft">
-        <img class="img-responsive center-block" src="images/Step1_suggestBookRide.png" alt="Suggest, Book and Ride" height="400">
+        <img class="img-responsive center-block" src="images/feature_mainBeeline.png" alt="Suggest, Book and Ride" height="400">
       </div>
     </div>
       <hr class="feature-divider">
@@ -101,7 +111,7 @@
         <p>Our bus routes are derived from insights that we obtain from analysing transportation data and community demand. Private bus operators can make use of these findings to bring convenient, comfortable and direct transportation alternative to those who want them the most, at affordable prices.</p>
       </div>
       <div class="col-md-5">
-        <img class="img-responsive center-block wow fadeInRight" src="images/sgHeatMap.png">
+        <img class="img-responsive center-block wow fadeInRight heatmap" src="images/feature_sgCrowdsource.png" alt="Heatmap of crowdsourced routes">
       </div>
     </div>
 
@@ -113,7 +123,7 @@
         <p>Beeline's matching and booking platform helps our partner bus operators decide which routes to service. We also developed a suite of administrative and monitoring tools for our partner bus operators so that they can deliver better service to you. </p>
       </div>
       <div class="col-md-5 col-md-pull-7 wow fadeInLeft">
-        <img class="img-responsive center-block" src="images/busDriverApp.png" alt="Generic placeholder image" width="400px" height="400px">
+        <img class="img-responsive center-block" src="images/feature_opsTool.png" alt="Driver App" width="400px" height="400px">
       </div>
     </div>
 
@@ -125,7 +135,7 @@
         <p>We envision a future where the transport network will adapt to the ebb and flow of our lovely city. A future where individuals and communities are empowered to improve their own commuting experience and transport providers are better equipped to respond to the changing needs. And this platform is the enabler.</p>
       </div>
       <div class="col-md-5">
-        <img class="img-circle img-responsive center-block wow fadeInRight" src="images/city.png" width="380px" height="380px">
+        <img class="img-circle img-responsive center-block wow fadeInRight" src="images/feature_maas.png" alt="Car-lite Future" width="380px" height="380px">
       </div>
     </div>
   </div>
@@ -135,43 +145,44 @@
     <!-- Three columns of text below the carousel -->
     <div class="row">
       <h1 class="text-center">What makes Beeline different?</h1>
-      <div class="col-lg-4 col-md-6 col-sm-12">
-        <img class="img-responsive wow bounceIn" src="images/Icon_Adaptive.svg" alt="Generic placeholder image" width="100" height="100">
+      <div class="col-lg-4 col-md-4 col-sm-12">
+        <img class="img-responsive center-block wow bounceIn" src="images/Icon_Adaptive.svg" alt="Adaptive" width="100" height="100">
         <h4>Adaptive</h4>
         <p>Our routes should adjust
           <br />based on your demand</p>
       </div>
       <!-- /.col-lg-4 -->
-      <div class="col-lg-4 col-md-6 col-sm-12">
-        <img class="img-responsive wow bounceIn" src="images/Icon_Affordable.svg" alt="Generic placeholder image" width="100" height="100">
+      <div class="col-lg-4 col-md-4 col-sm-12">
+        <img class="img-responsive center-block wow bounceIn" src="images/Icon_Affordable.svg" alt="Affordable" width="100" height="100">
         <h4>Affordable</h4>
         <p>A ride on Beeline should cost you
           <br />less than a taxi ride</p>
       </div>
       <!-- /.col-lg-4 -->
-      <div class="col-lg-4 col-md-6 col-sm-12">
-        <img class="img-responsive wow bounceIn" src="images/Icon_Comfortable.svg" alt="Generic placeholder image" width="100" height="100">
+      <div class="col-lg-4 col-md-4 col-sm-12">
+        <img class="img-responsive center-block wow bounceIn" src="images/Icon_Comfortable.svg" alt="Comfortable" width="100" height="100">
         <h4>Comfortable</h4>
         <p>Rides on Beeline should be
           <br /> fast and direct</p>
       </div>
       <!-- /.col-lg-4 -->
-
-      <div class="col-lg-4 col-md-6 col-sm-12">
-        <img class="img-responsive wow bounceIn" src="images/Icon_Convenient.svg" alt="Generic placeholder image" width="100" height="100">
+      </div>
+      <div class="row">
+      <div class="col-lg-4 col-md-4 col-sm-12">
+        <img class="img-responsive center-block wow bounceIn" src="images/Icon_Convenient.svg" alt="Convenient" width="100" height="100">
         <h4>Convenient</h4>
         <p>You can book in advance and pay <br />for your trip via the mobile app</p>
       </div>
       <!-- /.col-lg-4 -->
-      <div class="col-lg-4 col-md-6 col-sm-12">
-        <img class="img-responsive wow bounceIn" src="images/Icon_Dependable.svg" alt="Generic placeholder image" width="100" height="100">
+      <div class="col-lg-4 col-md-4 col-sm-12">
+        <img class="img-responsive center-block wow bounceIn" src="images/Icon_Dependable.svg" alt="Dependable" width="100" height="100">
         <h4>Dependable</h4>
         <p>Know when your bus arrives
           <br /> with GPS Tracking</p>
       </div>
       <!-- /.col-lg-4 -->
-      <div class="col-lg-4 col-md-6 col-sm-12">
-        <img class="img-responsive wow bounceIn" src="images/Icon_Empowering.svg" alt="Generic placeholder image" width="100" height="100">
+      <div class="col-lg-4 col-md-4 col-sm-12">
+        <img class="img-responsive center-block wow bounceIn" src="images/Icon_Empowering.svg" alt="Empowering" width="100" height="100">
         <h4>Empowering</h4>
         <p>User suggested routes
           <br />activated by community demand</p>

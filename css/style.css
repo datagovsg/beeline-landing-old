@@ -4060,7 +4060,7 @@ tbody.collapse.in {
 
 .navbar-inverse {
   background-color: #312541;
-  border-color: #181221; }
+  border-color: transparent; }
   .navbar-inverse .navbar-brand {
     color: #e4deed; }
     .navbar-inverse .navbar-brand:hover, .navbar-inverse .navbar-brand:focus {
@@ -4093,9 +4093,9 @@ tbody.collapse.in {
     color: #fff; }
   @media (max-width: 767px) {
     .navbar-inverse .navbar-nav .open .dropdown-menu > .dropdown-header {
-      border-color: #181221; }
+      border-color: transparent; }
     .navbar-inverse .navbar-nav .open .dropdown-menu .divider {
-      background-color: #181221; }
+      background-color: transparent; }
     .navbar-inverse .navbar-nav .open .dropdown-menu > li > a {
       color: #e4deed; }
       .navbar-inverse .navbar-nav .open .dropdown-menu > li > a:hover, .navbar-inverse .navbar-nav .open .dropdown-menu > li > a:focus {
@@ -5890,12 +5890,12 @@ button.close {
 /* override Bootstrap defaults */
 body {
   font-family: 'Lato', sans-serif;
-  font-weight: 300;
-  margin-top: 60px; }
+  font-weight: 300; }
 
 .navbar {
   margin-bottom: 0;
-  letter-spacing: 1px; }
+  letter-spacing: 1px;
+  border-color: transparent; }
 
 .jumbotron {
   padding-top: 0;
@@ -5916,31 +5916,23 @@ body {
     flex-direction: row;
     align-items: center;
     height: 100%; }
-    .jumbotron .container .jumbocontent {
-      margin: 10px 0; }
+    .jumbotron .container .appBadgeBtn:hover {
+      opacity: 0.8; }
+    .jumbotron .container .appBadgeBtn img {
+      max-width: 280px;
+      max-height: 80px;
+      margin-bottom: 20px; }
+    .jumbotron .container .webApp {
+      height: 60px;
+      margin-bottom: 20px;
+      vertical-align: middle; }
+      .jumbotron .container .webApp.btn-lg, .jumbotron .container .btn-group-lg > .webApp.btn {
+        padding: 12px 20px; }
     .jumbotron .container .reminder {
-      padding: 10px 0;
       color: #bbbbbb;
       font-size: 16px; }
       .jumbotron .container .reminder .fa-refresh {
         padding-right: 10px; }
-
-.nohand {
-  position: absolute;
-  background: url("../images/nohands.png");
-  background-repeat: no-repeat;
-  height: 800px;
-  width: 618px;
-  right: 0;
-  top: 0; }
-
-.app-badge {
-  margin-right: 16px; }
-  .app-badge:hover {
-    opacity: 0.8; }
-
-.webapp {
-  width: 420px; }
 
 .footer {
   width: 100%;
@@ -5989,31 +5981,39 @@ body {
 
   .hand {
     position: absolute;
-    background: url("../images/beelineApp2.png");
+    background: url("../images/beelineAppHand.png");
     background-repeat: no-repeat;
-    height: 829px;
-    width: 698px;
+    height: 820px;
+    width: 690px;
     top: 100px;
-    right: 0; } }
+    right: 0; }
+
+  .heatmap {
+    position: relative;
+    top: 0px; } }
 @media (min-width: 992px) {
   .feature-heading {
     margin-top: 120px; }
 
   .hand {
     position: absolute;
-    background: url("../images/beelineApp2.png");
+    background: url("../images/beelineAppHand.png");
     background-repeat: no-repeat;
-    height: 829px;
-    width: 698px;
+    height: 820px;
+    width: 690px;
     top: 100px;
-    right: -100px; } }
+    right: -100px; }
+
+  .heatmap {
+    position: relative;
+    top: 120px; } }
 @media (min-width: 1442px) {
   .hand {
     position: absolute;
-    background: url("../images/beelineApp2.png");
+    background: url("../images/beelineAppHand.png");
     background-repeat: no-repeat;
-    height: 829px;
-    width: 698px;
+    height: 820px;
+    width: 690px;
     top: 100px;
     right: 0; } }
 .gray {

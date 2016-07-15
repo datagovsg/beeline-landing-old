@@ -3,17 +3,19 @@
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
-  margin-top: $navbar-height;
 }
 .navbar {
   margin-bottom: 0;
   letter-spacing: 1px;
+  border-color: transparent;
 }
+
 .jumbotron {
   padding-top: 0;
   padding-bottom: 0;
   margin-bottom: 50px;
 }
+
 /* landing specific styles */
 .jumbotron {
   height: 700px;
@@ -29,11 +31,29 @@ body {
     flex-direction: row;
     align-items: center;
     height: 100%;
-    .jumbocontent {
-      margin: 10px 0;
+
+    .appBadgeBtn{
+      &:hover{
+        opacity: 0.8;
+      }
+      img{
+          max-width: 280px;
+          max-height: 80px;
+          margin-bottom: $padding-small-horizontal*2;
+      }
     }
+
+
+    .webApp{
+      height: 60px;
+      margin-bottom: $padding-small-horizontal*2;
+      vertical-align: middle;
+      &.btn-lg{
+        padding: 12px 20px;
+      }
+    }
+
     .reminder{
-        padding: $padding-small-horizontal 0;
         color: darken($gray-lighter, 20%);
         font-size: $font-size-small;
       .fa-refresh {
@@ -42,25 +62,7 @@ body {
     }
   }
 }
-.nohand {
-  position: absolute;
-  background: url("../images/nohands.png");
-  background-repeat: no-repeat;
-  height: 800px;
-  width: 618px;
-  right: 0;
-  top: 0;
-}
-.app-badge {
-  margin-right: $padding_large_horizontal;
-  &:hover {
-    opacity: 0.8;
-  }
-}
 
-.webapp {
-  width: 420px;
-}
 .footer {
   width: 100%;
   padding: 20px 0;
@@ -111,8 +113,12 @@ body {
     margin: 40px auto;
   }
 }
+
+
 /* Responsive CSS
 -------------------------------------------------- */
+
+
 @media (min-width: 768px) {
   /* Bump up size of feature-heading */
   .feature-heading {
@@ -120,12 +126,16 @@ body {
   }
   .hand {
     position: absolute;
-    background: url("../images/beelineApp2.png");
+    background: url("../images/beelineAppHand.png");
     background-repeat: no-repeat;
-    height: 829px;
-    width: 698px;
+    height: 820px;
+    width: 690px;
     top: 100px;
     right: 0;
+  }
+  .heatmap {
+    position: relative;
+    top: 0px;
   }
 }
 @media (min-width: 992px) {
@@ -134,23 +144,26 @@ body {
   }
   .hand {
     position: absolute;
-    background: url("../images/beelineApp2.png");
+    background: url("../images/beelineAppHand.png");
     background-repeat: no-repeat;
-    height: 829px;
-    width: 698px;
+    height: 820px;
+    width: 690px;
     top: 100px;
     right: -100px;
-
+  }
+  .heatmap {
+    position: relative;
+    top: 120px;
   }
 }
 
   @media (min-width: 1442px) {
     .hand {
       position: absolute;
-      background: url("../images/beelineApp2.png");
+      background: url("../images/beelineAppHand.png");
       background-repeat: no-repeat;
-      height: 829px;
-      width: 698px;
+      height: 820px;
+      width: 690px;
       top: 100px;
       right: 0;
     }
