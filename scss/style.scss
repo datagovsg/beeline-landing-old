@@ -15,6 +15,7 @@ body {
   padding-top: 0;
   padding-bottom: 0;
   margin-bottom: 50px;
+  overflow-x: hidden;
 }
 
 /* landing specific styles */
@@ -36,6 +37,7 @@ body {
     .row {
       padding: 5px 0px;
     }
+
     .appBadgeBtn{
       img{
           max-width: 300px;
@@ -123,6 +125,15 @@ body {
 
 
 @media (min-width: 768px) {
+
+  .jumbotron{
+    .container{
+      .row{
+        &.badgeRow {
+        }
+      }
+    }
+  }
   /* Bump up size of feature-heading */
   .feature-heading {
     font-size: 45px;
@@ -134,7 +145,7 @@ body {
     height: 820px;
     width: 690px;
     top: 100px;
-    right: 0;
+    right: -400px;
   }
   .heatmap {
     position: relative;
@@ -145,6 +156,11 @@ body {
   .feature-heading {
     margin-top: $landing-margin*2;
   }
+
+  .badgeCol-2{
+    margin-left: -10px;
+  }
+
   .hand {
     position: absolute;
     background: url("../images/beelineAppHand.png");
@@ -152,7 +168,7 @@ body {
     height: 820px;
     width: 690px;
     top: 100px;
-    right: -100px;
+    right: -200px;
   }
   .heatmap {
     position: relative;
@@ -161,6 +177,9 @@ body {
 }
 
   @media (min-width: 1442px) {
+
+
+
     .hand {
       position: absolute;
       background: url("../images/beelineAppHand.png");

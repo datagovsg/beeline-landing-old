@@ -5901,7 +5901,8 @@ body {
 .jumbotron {
   padding-top: 0;
   padding-bottom: 0;
-  margin-bottom: 50px; }
+  margin-bottom: 50px;
+  overflow-x: hidden; }
 
 /* landing specific styles */
 .jumbotron {
@@ -5989,7 +5990,7 @@ body {
     height: 820px;
     width: 690px;
     top: 100px;
-    right: 0; }
+    right: -400px; }
 
   .heatmap {
     position: relative;
@@ -5998,6 +5999,9 @@ body {
   .feature-heading {
     margin-top: 120px; }
 
+  .badgeCol-2 {
+    margin-left: -10px; }
+
   .hand {
     position: absolute;
     background: url("../images/beelineAppHand.png");
@@ -6005,7 +6009,7 @@ body {
     height: 820px;
     width: 690px;
     top: 100px;
-    right: -100px; }
+    right: -200px; }
 
   .heatmap {
     position: relative;
