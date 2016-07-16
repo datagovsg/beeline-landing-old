@@ -24,13 +24,14 @@
   <!-- <script src="js/bootstrap.js"></script> -->
   <script src="https://use.fontawesome.com/e1c177a50d.js"></script>
   <script src="js/wow.min.js"></script>
+  <script src="js/landing.js"></script>
 
   <!--Favicon-->
   <link rel="icon" type="image/png" href="images/favicon.png">
 
 </head>
 
-<body>
+<body id="top">
   <!-- Static navbar -->
   <nav class="navbar navbar-static-top navbar-default">
     <div class="container">
@@ -58,6 +59,11 @@
     </div>
   </nav>
   <div class="jumbotron">
+    <div class="toMainContent center-block">
+      <a class="link" href="#mainContent"><span class="fa-3x">
+          <i class="fa fa-angle-down"></i>
+          </span></a>
+    </div>
     <div class="container">
       <div class="hand wow fadeInRight"></div>
       <div class="jumbotronContent">
@@ -93,7 +99,7 @@
       </div>
     </div>
   </div>
-  <div class="container">
+  <div class="container" id="mainContent">
 
     <div class="row feature">
       <div class="col-md-7 col-md-push-5 wow fadeInRight">
@@ -214,7 +220,7 @@
     <div class="container">
       <hr />
       <p class="pull-left">&copy; 2016 Beeline Singapore. &nbsp; All rights reserved.</p>
-      <p class="pull-right"><a class="links" href="#">Privacy Policy</a> &middot; <a class="links" href="#">Terms of Use </a>&middot;<a class="links" href="#">Back to top</a></p>
+      <p class="pull-right"><a class="links" href="#">Privacy Policy</a> &middot; <a class="links" href="#">Terms of Use </a>&middot;<a class="links" href="#top">Back to top</a></p>
     </div>
   </footer>
   <script>
