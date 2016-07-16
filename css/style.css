@@ -5907,7 +5907,7 @@ body {
 /* landing specific styles */
 .toMainContent {
   position: absolute;
-  bottom: 8%;
+  bottom: 3%;
   width: 100%;
   text-align: center;
   opacity: 0.7; }
@@ -6005,12 +6005,21 @@ body {
 -------------------------------------------------- */
 /*==========  Mobile First Method  ==========*/
 /* Custom, iPhone Retina */
+@media only screen and (min-width: 320px) {
+  .toMainContent {
+    display: none; }
+
+  .jumbotronContent p {
+    font-size: 18px; } }
 /* Extra Small Devices, Phones */
 /* Small Devices, Tablets */
 @media only screen and (min-width: 768px) {
+  .toMainContent {
+    display: block; }
+
   .badgeRow .badgeCol-2 {
     position: relative;
-    left: 0px; }
+    left: -160px; }
 
   /* Bump up size of feature-heading */
   .feature-heading {
@@ -6051,6 +6060,10 @@ body {
     top: 120px; } }
 /* Large Devices, Wide Screens */
 @media only screen and (min-width: 1200px) {
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: -80px; }
+
   .hand {
     position: absolute;
     background: url("../images/beelineAppHand.png");
