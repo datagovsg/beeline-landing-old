@@ -5935,15 +5935,15 @@ body {
     .jumbotron .container .row {
       padding: 5px 0px; }
     .jumbotron .container .appBadgeBtn img {
-      max-width: 300px;
-      max-height: 80px;
+      height: 60px;
       margin-bottom: 10px;
-      border-radius: 10px; }
+      border-radius: 8px; }
       .jumbotron .container .appBadgeBtn img:hover {
         -moz-box-shadow: 0px 0px 5px #FFF;
         -webkit-box-shadow: 0px 0px 5px #FFF;
         box-shadow: 0px 0px 5px #FFF; }
     .jumbotron .container .webApp {
+      margin-top: -10px;
       margin-bottom: 20px;
       vertical-align: middle; }
       .jumbotron .container .webApp.btn-lg, .jumbotron .container .btn-group-lg > .webApp.btn {
@@ -6003,7 +6003,15 @@ body {
 
 /* Responsive CSS
 -------------------------------------------------- */
-@media (min-width: 768px) {
+/*==========  Mobile First Method  ==========*/
+/* Custom, iPhone Retina */
+/* Extra Small Devices, Phones */
+/* Small Devices, Tablets */
+@media only screen and (min-width: 768px) {
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: 0px; }
+
   /* Bump up size of feature-heading */
   .feature-heading {
     font-size: 45px; }
@@ -6020,12 +6028,14 @@ body {
   .heatmap {
     position: relative;
     top: 0px; } }
-@media (min-width: 992px) {
+/* Medium Devices, Desktops */
+@media only screen and (min-width: 992px) {
   .feature-heading {
     margin-top: 120px; }
 
-  .badgeCol-2 {
-    margin-left: -10px; }
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: -30px; }
 
   .hand {
     position: absolute;
@@ -6039,7 +6049,18 @@ body {
   .heatmap {
     position: relative;
     top: 120px; } }
-@media (min-width: 1442px) {
+/* Large Devices, Wide Screens */
+@media only screen and (min-width: 1200px) {
+  .hand {
+    position: absolute;
+    background: url("../images/beelineAppHand.png");
+    background-repeat: no-repeat;
+    height: 820px;
+    width: 690px;
+    top: 100px;
+    right: -100px; } }
+/* Super Large Devices, Super Wide Screens */
+@media only screen and (min-width: 1442px) {
   .hand {
     position: absolute;
     background: url("../images/beelineAppHand.png");
