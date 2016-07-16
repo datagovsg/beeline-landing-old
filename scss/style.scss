@@ -43,9 +43,11 @@ body {
           max-width: 300px;
           max-height: 80px;
           margin-bottom: $padding-small-horizontal;
+          border-radius: 10px;
           &:hover{
-            box-shadow: 0 0 10px $gray-lighter;
-            border-radius: $border-radius-large;
+            -moz-box-shadow: 0px 0px 5px $white;
+            -webkit-box-shadow: 0px 0px 5px $white;
+            box-shadow: 0px 0px 5px $white;
           }
       }
     }
@@ -59,10 +61,21 @@ body {
     }
 
     .reminder{
-        color: darken($gray-lighter, 20%);
+      p{
+        float: left;
+        color: lighten($brand-primary, 50%);
         font-size: $font-size-small;
-      .fa-refresh {
-        padding-right: $padding-small-horizontal;
+      }
+      .fa-2x{
+        color: lighten($brand-primary, 50%);
+        opacity: 0.8;
+        filter: alpha(opacity=80); /* For IE8 and earlier */
+        .fa-refresh {
+          position: relative;
+          float: left;
+          top: 5px;
+          padding-right: $padding-small-horizontal;
+        }
       }
     }
   }
