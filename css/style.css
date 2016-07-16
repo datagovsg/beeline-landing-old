@@ -5933,25 +5933,26 @@ body {
     align-items: center;
     height: 100%; }
     .jumbotron .container .row {
-      padding: 5px 0px; }
+      padding: 5px 0; }
     .jumbotron .container .appBadgeBtn img {
       height: 60px;
       margin-bottom: 10px;
       border-radius: 8px; }
       .jumbotron .container .appBadgeBtn img:hover {
-        -moz-box-shadow: 0px 0px 5px #FFF;
-        -webkit-box-shadow: 0px 0px 5px #FFF;
-        box-shadow: 0px 0px 5px #FFF; }
+        -moz-box-shadow: 0 0 5px #FFF;
+        -webkit-box-shadow: 0 0 5px #FFF;
+        box-shadow: 0 0 5px #FFF; }
     .jumbotron .container .webApp {
       margin-top: -10px;
       margin-bottom: 20px;
       vertical-align: middle; }
       .jumbotron .container .webApp.btn-lg, .jumbotron .container .btn-group-lg > .webApp.btn {
-        padding: 10px 30px; }
+        padding: 10px 24px; }
     .jumbotron .container .reminder p {
       float: left;
       color: #cabeda;
-      font-size: 16px; }
+      font-size: 16px;
+      width: 80%; }
     .jumbotron .container .reminder .fa-2x {
       color: #cabeda;
       opacity: 0.8;
@@ -6007,13 +6008,29 @@ body {
 /* Custom, iPhone Retina */
 @media only screen and (min-width: 320px) and (max-device-width: 480px) {
   .toMainContent {
-    display: none; } }
+    display: none; }
+
+  .jumbotron .hand {
+    right: 0;
+    top: 0;
+    left: 0;
+    display: inline;
+    position: absolute;
+    height: 50%;
+    width: 50%;
+    z-index: 100; }
+  .jumbotron .jumbotronContent {
+    position: relative;
+    float: left; }
+
+  .footer {
+    text-align: center; } }
 /* Extra Small Devices, Phones */
+@media only screen and (min-width: 480px) and (max-device-width: 768px) {
+  .toMainContent {
+    display: none; } }
 /* Small Devices, Tablets */
 @media only screen and (min-width: 768px) and (max-device-width: 992px) {
-  .toMainContent {
-    display: block; }
-
   .badgeRow .badgeCol-2 {
     position: relative;
     left: -160px; }
@@ -6033,7 +6050,7 @@ body {
 
   .heatmap {
     position: relative;
-    top: 0px; } }
+    top: 0; } }
 /* Medium Devices, Desktops */
 @media only screen and (min-width: 992px) and (max-device-width: 1200px) {
   .feature-heading {
@@ -6071,6 +6088,10 @@ body {
     right: -100px; } }
 /* Super Large Devices, Super Wide Screens */
 @media only screen and (min-width: 1442px) {
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: -80px; }
+
   .hand {
     position: absolute;
     background: url("../images/beelineAppHand.png");
