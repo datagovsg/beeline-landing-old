@@ -20,7 +20,7 @@ body {
 
 /* landing specific styles */
 .toMainContent{
-  position: absolute;;
+  position: absolute;
   bottom: 5%;
   width: 100%;
   text-align: center;
@@ -155,19 +155,20 @@ body {
 /*==========  Mobile First Method  ==========*/
 
   /* Custom, iPhone Retina */
-  @media only screen and (min-width : 320px) {
+  @media only screen and (min-width : 320px) and (max-device-width : 480px){
     .toMainContent{
       display: none;
     }
   }
 
   /* Extra Small Devices, Phones */
-  @media only screen and (min-width : 480px) {
+  @media only screen and (min-width : 480px) and (max-device-width : 768px) {
 
   }
 
   /* Small Devices, Tablets */
-  @media only screen and (min-width : 768px) {
+  @media only screen and (min-width : 768px) and (max-device-width : 992px) {
+
     .toMainContent{
       display: block;
     }
@@ -199,7 +200,7 @@ body {
   }
 
   /* Medium Devices, Desktops */
-  @media only screen and (min-width : 992px) {
+  @media only screen and (min-width : 992px) and (max-device-width : 1200px) {
 
     .feature-heading {
       margin-top: $landing-margin*2;
@@ -229,7 +230,7 @@ body {
   }
 
   /* Large Devices, Wide Screens */
-  @media only screen and (min-width : 1200px) {
+  @media only screen and (min-width : 1200px) and (max-device-width : 1442px) {
     .badgeRow {
       .badgeCol-2 {
         position: relative;
