@@ -115,6 +115,10 @@ body {
     margin-top: 10px;
     margin-bottom: 10px;
     text-align: center;
+    img {
+      height: 100px;
+      width: 100px;
+    }
   }
   h1 {
     text-align: center;
@@ -164,7 +168,7 @@ body {
       float: left;
     }
   }
-  .footer {
+  footer {
     text-align: center;
   }
 }
