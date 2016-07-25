@@ -1,0 +1,134 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="css/style.css" />
+    <title>Suggest a Beeline Route!</title>
+    <style>
+    google-map {
+      width: 100%;
+      height: 300px;
+      display: block;
+    }
+    .vue-map-container {
+      width: 100%; height:100%;
+    }
+
+    .times {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .times .time {
+      display: flex;
+      flex-direction: column;
+    }
+    label {
+      display: block;
+    }
+    .timeGroup label {
+      padding: 0.5em;
+      border: solid 1px #FFF;
+      box-sizing: border-box;
+    }
+    .timeGroup label.active {
+      background-color: #FFC;
+      border: solid 1px #996;
+      border-radius: 3px;
+      box-sizing: border-box;
+    }
+
+    #origin-destination {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    #origin-destination section {
+      flex: 0 1 500px;
+      padding: 1em;
+    }
+
+    .invalid:not(.pristine) input {
+      border: solid 1px red;
+      border-radius: 3px;
+    }
+    </style>
+  </head>
+  <body v-cloak>
+
+    <h1>Suggest a Route!</h1>
+
+    <validator name="validation">
+      <section id="origin-destination">
+        <section id="origin">
+          <h2>From where?</h2>
+
+          <div v-validate-class>
+            <input type="text" v-model="suggestion.origin"
+              v-validate:origin="{required: true}" hidden="true">
+
+            <place-input placeholder="Origin" :bounds="Singapore"
+              :place.sync="suggestion.originPlace" @g-place_changed="$validate('origin')">
+            </place-input>
+          </div>
+
+          <suggest-preview :suggestion="suggestion" :center-at.sync="suggestion.origin"
+            v-ref:preview-origin>
+          </suggest-preview>
+        </section>
+
+        <section id="destination">
+          <h2>To where?</h2>
+
+          <div v-validate-class>
+            <input type="text" v-model="suggestion.destination"
+              v-validate:destination="{required: true}" hidden="true">
+
+            <place-input placeholder="Destination" :bounds="Singapore"
+              :place.sync="suggestion.destinationPlace" @g-place_changed="$validate('destination')">
+            </place-input>
+          </div>
+          <suggest-preview :suggestion="suggestion" :center-at.sync="suggestion.destination"
+            v-ref:preview-destination>
+          </suggest-preview>
+        </section>
+      </section>
+
+      <section id="time">
+        <h2>Arrival time:</h2>
+        <div class="times">
+          <div v-for="timeGroup in TimeGroups" track-by="$index" class="timeGroup">
+            <label v-for="time in timeGroup" track-by="$index"
+                  :class="{active: arrivalTime === time}"
+            >
+              <input type="radio" v-model="arrivalTime" :value="time"
+                v-validate:arrival-time="{required: true}">
+              {{time}}
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section id="submit">
+        <label class="form-inline" v-validate-class>
+          Your email address:
+          <input type="email" class="form-control"
+            v-validate:email="validators.email">
+        </label>
+        <label>
+          <button class="btn btn-primary" type="button"
+            :disabled="!$validation.valid"
+          >Submit!</button>
+        </label>
+      </section>
+    </validation>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/1.0.26/vue.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.13.1/lodash.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/vue.validator/2.1.4/vue-validator.min.js"></script>
+    <script src="js/vue-google-maps.js"></script>
+    <script src="js/suggest.js"></script>
+  </body>
+</html>
