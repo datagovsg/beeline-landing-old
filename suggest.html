@@ -13,6 +13,7 @@
   <meta property="og:title" content="Beeline Singapore" />
   <meta property="og:description" content="Crowdsourced, direct shuttle to your destination" />
   <meta property="og:image" content="https://datagovsg.github.io/beeline-landing/images/beelineAppCover.png" />
+  <meta name="google-signin-client_id" content="225350353651-lulsqicl7nrv40qt2pqpog2sgtpdkgjv.apps.googleusercontent.com">
 
   <!--Mobile Specific Metas-->
   <!-- <meta name="viewport" content="width=device-width, initial-scale=1"> -->
@@ -37,6 +38,18 @@
   <!--Favicon-->
   <link rel="icon" type="image/png" href="images/favicon.png">
 
+  <style>
+
+  google-map {
+    width: 100%;
+    height: 300px;
+    display: block;
+  }
+  .vue-map-container {
+    width: 100%; height:100%;
+  }
+
+  </style>
 </head>
 
 <body id="top">
@@ -64,63 +77,104 @@
       </div>
     </div>
   </nav>
-  <div class="container suggest">
+  <form class="container suggest" @submit="submit" v-cloak id="submit-form">
+    <validator name="validation">
+      <h1 class="heading">Suggest a new route</h1>
+      <div class="row">
+        <div class="col-lg-7 col-md-6 col-sm-12">
 
-    <h1 class="heading">Suggest a new route</h1>
-    <div class="row">
-      <div class="col-lg-7 col-md-6 col-sm-12">
+          <google-map :center="center" :zoom="zoom" @g-click="click"
+            v-ref:map>
+            <google-marker v-if="suggestion.origin"
+                            :position="suggestion.origin"
+                            label="S">
+            </google-marker>
+            <google-marker v-if="suggestion.destination"
+                            :position="suggestion.destination"
+                            label="E">
+            </google-marker>
+            <google-polyline v-if="path" :path="path">
+            </google-polyline>
+          </google-map>
 
-        <script src='https://maps.googleapis.com/maps/api/js?v=3.exp'></script><div style='overflow:hidden;height:440px;width:700px;'><div id='gmap_canvas' style='height:440px;width:600px;'></div><div><small><a href="http://embedgooglemaps.com">									embed google maps							</a></small></div><div><small><a href="https://privacypolicytemplate.net">privacy policy example</a></small></div><style>#gmap_canvas img{max-width:none!important;background:none!important}</style></div><script type='text/javascript'>function init_map(){var myOptions = {zoom:10,center:new google.maps.LatLng(51.5073509,-0.12775829999998223),mapTypeId: google.maps.MapTypeId.ROADMAP};map = new google.maps.Map(document.getElementById('gmap_canvas'), myOptions);marker = new google.maps.Marker({map: map,position: new google.maps.LatLng(51.5073509,-0.12775829999998223)});infowindow = new google.maps.InfoWindow({content:'<strong>Title</strong><br>London, United Kingdom<br>'});google.maps.event.addListener(marker, 'click', function(){infowindow.open(map,marker);});infowindow.open(map,marker);}google.maps.event.addDomListener(window, 'load', init_map);</script>
+        </div>
+        <div class="col-lg-5 col-md-6 col-sm-12">
+          <form>
+            <div class="form-group" v-validate-class>
+              <!-- Dummy input for validation -->
+              <input type="text" v-model="suggestion.origin"
+                v-validate:origin="{required: true}" hidden="true">
 
+              <label>Start address</label>
+                <place-input placeholder="Street, Postal code, Building name, etc."
+                  :bounds="Singapore"
+                  :place.sync="suggestion.originPlace"
+                  @g-place_changed="placeChanged('origin')"
+                  class="form-control">
+                </place-input>
+              </label>
+            </div>
+            <div class="form-group" v-validate-class>
+              <!-- Dummy input for validation -->
+              <input type="text" v-model="suggestion.destination"
+                v-validate:destination="{required: true}" hidden="true">
+
+              <label>End address
+                <place-input placeholder="Street, Postal code, Building name, etc."
+                  :bounds="Singapore"
+                  :place.sync="suggestion.destinationPlace"
+                  @g-place_changed="placeChanged('destination')"
+                  class="form-control">
+                </place-input>
+              </label>
+            </div>
+            <div class="form-group">
+              <label for="exampleInputPassword1">Time at Destination</label>
+              <select class="form-control" v-model="arrivalTime"
+                  v-validate:arrival-time="{required: true}"
+                  @focus="zoomOut()">
+                <optgroup label="AM">
+                  <option value="06:00">6:00 AM</option>
+                  <option value="07:00">7:00 AM</option>
+                  <option value="08:00">8:00 AM</option>
+                  <option value="09:00">9:00 AM</option>
+                </optgroup>
+                <optgroup label="PM">
+                  <option value="5:00">5:00 PM</option>
+                  <option value="6:00">6:00 PM</option>
+                  <option value="7:00">7:00 PM</option>
+                  <option value="8:00">8:00 PM</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="exampleInputEmail1">Email Address</label>
+              <input type="email" class="form-control" v-model="email" placeholder="Email"
+                :disabled="emailVerification"
+                v-validate:email="validators.email">
+            </div>
+
+            <div class="checkbox">
+              <label>
+                <input type="checkbox"> Yes, I read and agree to Beeline's <a>Privacy Policy</a> and <a>Terms of use</a>.
+              </label>
+            </div>
+            <div class="pull-left">
+              <div class="g-signin2" data-onsuccess="onSignIn"></div>
+              <button type="submit" class="btn btn-default webApp"
+                :disabled="!$validation.valid">
+                Submit Route Suggestion
+              </button>
+            </div>
+
+          </form>
+
+
+        </div>
 
       </div>
-      <div class="col-lg-5 col-md-6 col-sm-12">
-
-
-        <form>
-          <div class="form-group">
-            <label for="exampleInputEmail1">Start address</label>
-            <input type="email" class="form-control" id="exampleInputEmail1" placeholder="Email">
-          </div>
-          <div class="form-group">
-            <label for="exampleInputEmail1">End address</label>
-            <input type="email" class="form-control" id="exampleInputEmail1" placeholder="Email">
-          </div>
-          <div class="form-group">
-            <label for="exampleInputPassword1">Time at Destination</label>
-            <select class="form-control">
-              <option>1</option>
-              <option>2</option>
-              <option>3</option>
-              <option>4</option>
-              <option>5</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="exampleInputEmail1">Email Address</label>
-            <input type="email" class="form-control" id="exampleInputEmail1" placeholder="Email">
-          </div>
-
-          <div class="checkbox">
-            <label>
-              <input type="checkbox"> Yes, I read and agree to Beeline's <a>Privacy Policy</a> and <a>Terms of use</a>.
-            </label>
-          </div>
-          <div class="pull-left">
-
-
-
-            <button type="submit" class="btn btn-default webApp">Submit Route Suggestion</button>
-          </div>
-
-        </form>
-
-
-      </div>
-
-    </div>
-
-  </div>
+    </validator>
+  </form>
 
   <!-- /.row -->
   <hr class="divider">
@@ -137,25 +191,16 @@
       </p>
     </div>
   </footer>
-  <!--   <script>
-  new WOW().init();
-</script>
-<script>
-  (function(i, s, o, g, r, a, m) {
-    i['GoogleAnalyticsObject'] = r;
-    i[r] = i[r] || function() {
-      (i[r].q = i[r].q || []).push(arguments)
-    }, i[r].l = 1 * new Date();
-    a = s.createElement(o),
-      m = s.getElementsByTagName(o)[0];
-    a.async = 1;
-    a.src = g;
-    m.parentNode.insertBefore(a, m)
-  })(window, document, 'script', 'https://www.google-analytics.com/analytics.js', 'ga');
 
-  ga('create', 'UA-79537959-3', 'auto');
-  ga('send', 'pageview');
-</script> -->
+  <!-- 3rd party authentication -->
+  <script src="https://apis.google.com/js/platform.js" async defer></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/1.0.26/vue.js"></script>
+  <script src="https://cdn.jsdelivr.net/vue.resource/0.9.3/vue-resource.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.13.1/lodash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/vue.validator/2.1.4/vue-validator.min.js"></script>
+  <script src="js/vue-google-maps.js"></script>
+  <script src="js/suggest.js"></script>
 </body>
 
 </html>
