@@ -5916,12 +5916,8 @@ hr.divider {
   position: absolute;
   background: url("../images/beelineAppHand.png");
   background-repeat: no-repeat;
-  display: block;
-  height: 820px;
-  width: 690px;
-  top: -50px;
-  right: -220px;
-  transform: scale(0.6, 0.6); }
+  display: none;
+  overflow-x: hidden; }
   @media (min-width: 768px) {
     .hand {
       position: absolute;
@@ -6000,8 +5996,8 @@ hr.divider {
     align-items: center;
     height: 100%; }
     .jumbotron .container .row {
-      position: absolute;
-      top: 500px; }
+      text-align: center;
+      padding: 5px 0; }
       @media (min-width: 768px) {
         .jumbotron .container .row {
           position: static;
