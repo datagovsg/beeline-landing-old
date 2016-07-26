@@ -5905,9 +5905,12 @@ body {
   overflow-x: hidden; }
 
 /* landing specific styles */
+h1.heading {
+  margin-bottom: 60px; }
+
 .toMainContent {
   position: absolute;
-  bottom: 5%;
+  top: 650px;
   width: 100%;
   text-align: center;
   opacity: 0.7; }
@@ -5918,6 +5921,22 @@ body {
       position: relative;
       top: 2px;
       opacity: 0.5; }
+
+hr.divider {
+  margin-top: 60px auto; }
+  @media (min-width: 768px) {
+    hr.divider {
+      width: 750px; } }
+  @media (min-width: 992px) {
+    hr.divider {
+      width: 970px; } }
+  @media (min-width: 1200px) {
+    hr.divider {
+      width: 1170px; } }
+
+.feature-divider {
+  margin: 60px 0;
+  /* Space out the Bootstrap <hr> more */ }
 
 .jumbotron {
   height: 700px;
@@ -5964,6 +5983,24 @@ body {
         top: 5px;
         padding-right: 10px; }
 
+/* Center align the text within the three columns below the carousel */
+.marketing {
+  margin-top: 60px;
+  margin-bottom: 60px; }
+  .marketing .col-lg-4 {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    text-align: center; }
+    .marketing .col-lg-4 img {
+      height: 100px;
+      width: 100px; }
+  .marketing h3 {
+    font-weight: normal; }
+  .marketing .col-lg-4 p {
+    margin-right: 40px;
+    margin-left: 40px;
+    padding: 0 10px; }
+
 .footer {
   width: 100%;
   padding: 20px 0;
@@ -5976,31 +6013,6 @@ body {
     .footer a.links:hover {
       color: #a2a2a2;
       text-decoration: none; }
-
-/* Center align the text within the three columns below the carousel */
-.marketing {
-  margin-top: 60px;
-  margin-bottom: 60px; }
-  .marketing .col-lg-4 {
-    margin-top: 10px;
-    margin-bottom: 10px;
-    text-align: center; }
-    .marketing .col-lg-4 img {
-      height: 100px;
-      width: 100px; }
-  .marketing h1 {
-    text-align: center;
-    margin-bottom: 60px; }
-  .marketing h3 {
-    font-weight: normal; }
-  .marketing .col-lg-4 p {
-    margin-right: 40px;
-    margin-left: 40px;
-    padding: 0 10px; }
-
-.feature-divider {
-  margin: 60px 0;
-  /* Space out the Bootstrap <hr> more */ }
 
 .partners img {
   margin: 40px auto; }
@@ -6103,3 +6115,6 @@ body {
     width: 690px;
     top: 100px;
     right: 0; } }
+.suggest {
+  padding-top: 20px;
+  padding-bottom: 30px; }

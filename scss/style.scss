@@ -5,21 +5,30 @@ body {
   font-weight: 300;
   overflow-x: hidden;
 }
+
+
 .navbar {
   margin-bottom: 0;
   letter-spacing: 1px;
   border-color: transparent;
 }
+
 .jumbotron {
   padding-top: 0;
   padding-bottom: 0;
   margin-bottom: 50px;
   overflow-x: hidden;
 }
+
 /* landing specific styles */
+
+h1.heading {
+    margin-bottom: $padding-large-vertical*6;
+  }
+
 .toMainContent {
   position: absolute;
-  bottom: 5%;
+  top: 650px;
   width: 100%;
   text-align: center;
   opacity: 0.7;
@@ -33,6 +42,26 @@ body {
     }
   }
 }
+
+hr.divider{
+    margin-top: $landing-margin auto;
+  @media (min-width: $screen-sm-min) {
+    width: $container-sm;
+  }
+  @media (min-width: $screen-md-min) {
+    width: $container-md;
+  }
+  @media (min-width: $screen-lg-min) {
+    width: $container-lg;
+  }
+}
+
+
+.feature-divider {
+  margin: $landing-margin 0;
+  /* Space out the Bootstrap <hr> more */
+}
+
 .jumbotron {
   height: 700px;
   color: $gray-lighter;
@@ -40,6 +69,7 @@ body {
   background-size: cover;
   background-repeat: no-repeat;
   line-height: $jumbotron-line-height;
+    
   .container {
     max-width: 100%;
     display: flex;
@@ -91,6 +121,33 @@ body {
     }
   }
 }
+
+/* Center align the text within the three columns below the carousel */
+.marketing {
+  margin-top: $landing-margin;
+  margin-bottom: $landing-margin;
+  .col-lg-4 {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    text-align: center;
+    img {
+      height: 100px;
+      width: 100px;
+    }
+  }
+    
+  h3 {
+    font-weight: normal;
+  }
+  .col-lg-4 {
+    p {
+      margin-right: 40px;
+      margin-left: 40px;
+      padding: 0 $padding-large-vertical;
+    }
+  }
+}
+
 .footer {
   width: 100%;
   padding: 20px 0;
@@ -107,38 +164,7 @@ body {
     }
   }
 }
-/* Center align the text within the three columns below the carousel */
-.marketing {
-  margin-top: $landing-margin;
-  margin-bottom: $landing-margin;
-  .col-lg-4 {
-    margin-top: 10px;
-    margin-bottom: 10px;
-    text-align: center;
-    img {
-      height: 100px;
-      width: 100px;
-    }
-  }
-  h1 {
-    text-align: center;
-    margin-bottom: $padding-large-vertical*6;
-  }
-  h3 {
-    font-weight: normal;
-  }
-  .col-lg-4 {
-    p {
-      margin-right: 40px;
-      margin-left: 40px;
-      padding: 0 $padding-large-vertical;
-    }
-  }
-}
-.feature-divider {
-  margin: $landing-margin 0;
-  /* Space out the Bootstrap <hr> more */
-}
+
 .partners {
   img {
     margin: 40px auto;
@@ -264,4 +290,9 @@ body {
     top: 100px;
     right: 0;
   }
+}
+
+.suggest {
+  padding-top: $padding-large-vertical*2;
+  padding-bottom: $padding-large-vertical*3;
 }
