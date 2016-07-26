@@ -1,22 +1,18 @@
 @import "bootstrap";
-
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
   overflow-x: hidden;
 }
-
 .navbar {
   margin-bottom: 0;
   letter-spacing: 1px;
   border-color: transparent;
 }
-
 h1.heading {
-    margin-bottom: $padding-large-vertical*6;
-  }
-
-hr.divider{
+  margin-bottom: $padding-large-vertical*6;
+}
+hr.divider {
   margin-top: $landing-margin auto;
   @media (min-width: $screen-sm-min) {
     width: $container-sm;
@@ -28,7 +24,6 @@ hr.divider{
     width: $container-lg;
   }
 }
-
 .hand {
   position: absolute;
   background: url("../images/beelineAppHand.png");
@@ -56,7 +51,6 @@ hr.divider{
     right: 0;
   }
 }
-
 .badgeRow {
   text-align: center;
   @media (min-width: $screen-sm-min) {
@@ -64,7 +58,7 @@ hr.divider{
   }
   .badgeCol-2 {
     position: relative;
-    left: 0px;
+    left: 0;
     @media (min-width: $screen-sm-min) {
       left: -160px;
     }
@@ -79,7 +73,6 @@ hr.divider{
     }
   }
 }
-
 .jumbotron {
   /* override Bootstrap defaults */
   padding-top: 0;
@@ -93,18 +86,15 @@ hr.divider{
   background-size: cover;
   background-repeat: no-repeat;
   line-height: $jumbotron-line-height;
-
-
   .toMainContent {
     position: absolute;
     top: 650px;
     width: 100%;
     text-align: center;
     opacity: 0.7;
-      @media only screen and (max-width : 480px) {
+    @media only screen and (max-width : 480px) {
       display: none;
-      }
-
+    }
     .fa-angle-down {
       color: $white;
       transition: all 0.5s ease-out;
@@ -115,14 +105,12 @@ hr.divider{
       }
     }
   }
-
   .container {
     max-width: 100%;
     display: flex;
     flex-direction: row;
     align-items: center;
     height: 100%;
-
     .row {
       text-align: center;
       padding: 5px 0;
@@ -175,12 +163,10 @@ hr.divider{
     }
   }
 }
-
-  /* Space out the hr for the featurette more */
+/* Space out the hr for the featurette more */
 .feature-divider {
   margin: $landing-margin 0;
 }
-
 /* Center align the text within the three columns below the carousel */
 .marketing {
   margin-top: $landing-margin;
@@ -194,7 +180,6 @@ hr.divider{
       width: 100px;
     }
   }
-
   h3 {
     font-weight: normal;
   }
@@ -206,13 +191,11 @@ hr.divider{
     }
   }
 }
-
 .partners {
   img {
     margin: 40px auto;
   }
 }
-
 .footer {
   width: 100%;
   padding: 20px 0;
@@ -226,6 +209,48 @@ hr.divider{
     &:hover {
       color: lighten($gray, 30%);
       text-decoration: none;
+    }
+  }
+  @media (max-width: $screen-sm-min) {
+    text-align: center;
+  }
+}
+/* Lists Styling */
+.modal-body {
+  h2 {
+    font-size: 25px;
+    margin-top: 20px;
+    margin-bottom: 30px;
+  }
+  p{
+    margin: 30px 0;
+  }
+  ul {
+    list-style: disc inside;
+  }
+  ol {
+    list-style: decimal inside;
+  }
+  ol,
+  ul {
+    padding-left: 0;
+    li {
+      margin-bottom: 1em;
+      list-style-position: outside;
+      margin-left: 20px;
+      padding-left: 10px;
+    }
+  }
+  ol ol,
+  ol ul,
+  ul ol,
+  ul ul {
+    margin: 1.5em 1em;
+    li {
+      margin-bottom: 1em;
+      list-style-position: outside;
+      margin-left: 20px;
+      padding-left: 10px;
     }
   }
 }

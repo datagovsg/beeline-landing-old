@@ -2476,10 +2476,10 @@ output {
   -o-transition: border-color ease-in-out 0.15s, box-shadow ease-in-out 0.15s;
   transition: border-color ease-in-out 0.15s, box-shadow ease-in-out 0.15s; }
   .form-control:focus {
-    border-color: #66afe9;
+    border-color: #6f4c9f;
     outline: 0;
-    -webkit-box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075), 0 0 8px rgba(102, 175, 233, 0.6);
-    box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075), 0 0 8px rgba(102, 175, 233, 0.6); }
+    -webkit-box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075), 0 0 8px rgba(111, 76, 159, 0.6);
+    box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075), 0 0 8px rgba(111, 76, 159, 0.6); }
   .form-control::-moz-placeholder {
     color: #999;
     opacity: 1; }
@@ -5180,7 +5180,7 @@ button.close {
   background-color: #fff;
   border: 1px solid #999;
   border: 1px solid rgba(0, 0, 0, 0.2);
-  border-radius: 10px;
+  border-radius: 3px;
   -webkit-box-shadow: 0 3px 9px rgba(0, 0, 0, 0.5);
   box-shadow: 0 3px 9px rgba(0, 0, 0, 0.5);
   background-clip: padding-box;
@@ -5202,7 +5202,7 @@ button.close {
     filter: alpha(opacity=50); }
 
 .modal-header {
-  padding: 15px;
+  padding: 20px;
   border-bottom: 1px solid #e5e5e5; }
   .modal-header:before, .modal-header:after {
     content: " ";
@@ -5219,10 +5219,10 @@ button.close {
 
 .modal-body {
   position: relative;
-  padding: 15px; }
+  padding: 50px; }
 
 .modal-footer {
-  padding: 15px;
+  padding: 20px;
   text-align: right;
   border-top: 1px solid #e5e5e5; }
   .modal-footer:before, .modal-footer:after {
@@ -5946,7 +5946,7 @@ hr.divider {
       text-align: left; } }
   .badgeRow .badgeCol-2 {
     position: relative;
-    left: 0px; }
+    left: 0; }
     @media (min-width: 768px) {
       .badgeRow .badgeCol-2 {
         left: -160px; } }
@@ -6071,3 +6071,40 @@ hr.divider {
     .footer a.links:hover {
       color: #a2a2a2;
       text-decoration: none; }
+  @media (max-width: 768px) {
+    .footer {
+      text-align: center; } }
+
+/* Lists Styling */
+.modal-body h2 {
+  font-size: 25px;
+  margin-top: 20px;
+  margin-bottom: 30px; }
+.modal-body p {
+  margin: 30px 0; }
+.modal-body ul {
+  list-style: disc inside; }
+.modal-body ol {
+  list-style: decimal inside; }
+.modal-body ol,
+.modal-body ul {
+  padding-left: 0; }
+  .modal-body ol li,
+  .modal-body ul li {
+    margin-bottom: 1em;
+    list-style-position: outside;
+    margin-left: 20px;
+    padding-left: 10px; }
+.modal-body ol ol,
+.modal-body ol ul,
+.modal-body ul ol,
+.modal-body ul ul {
+  margin: 1.5em 1em; }
+  .modal-body ol ol li,
+  .modal-body ol ul li,
+  .modal-body ul ol li,
+  .modal-body ul ul li {
+    margin-bottom: 1em;
+    list-style-position: outside;
+    margin-left: 20px;
+    padding-left: 10px; }
