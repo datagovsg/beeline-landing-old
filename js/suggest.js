@@ -61,7 +61,7 @@ VueGoogleMap.load({
 })
 
 var vue = new Vue({
-  el: 'body',
+  el: '#submit-form',
 
   data: {
     Singapore: null,
@@ -85,7 +85,9 @@ var vue = new Vue({
       email: {
         pattern: '/[^@\\s]+@[^@\\s\\.]+(\\.[^@\\s\\.]+)+/i',
       }
-    }
+    },
+    emailVerification: null,
+    email: ''
   },
   watch: {
     'suggestion.destinationPlace'(place) {
@@ -100,8 +102,43 @@ var vue = new Vue({
         this.$nextTick(() => this.$refs.previewOrigin.$emit('zoom'))
       }
     }
+  },
+  methods: {
+    submit(event) {
+      event.preventDefault();
+      this.$http.post('https://api.beeline.sg/suggestions/web', {
+        time: this.arrivalTime,
+        boardLat: this.suggestion.origin[0],
+        boardLon: this.suggestion.origin[1],
+        alightLat: this.suggestion.destination[0],
+        alightLon: this.suggestion.destination[1],
+        email: this.email,
+        emailVerification: this.emailVerification
+      })
+      .then((success) => {
+        alert('Submitted!')
+      }, (error) => {
+        alert('Error')
+      })
+    }
   }
 })
+
+function onSignIn(googleUser) {
+  var profile = googleUser.getBasicProfile();
+
+  vue.emailVerification = {
+    type: 'Google',
+    data: googleUser.getAuthResponse().id_token
+  };
+  vue.email = profile.getEmail();
+}
+function signOut() {
+  var auth2 = gapi.auth2.getAuthInstance();
+  auth2.signOut().then(function () {
+    console.log('User signed out.');
+  });
+}
 
 VueGoogleMap.loaded.then(() => {
   vue.Singapore = new google.maps.LatLngBounds(
