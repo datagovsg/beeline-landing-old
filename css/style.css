@@ -5887,7 +5887,6 @@ button.close {
 @media print {
   .hidden-print {
     display: none !important; } }
-/* override Bootstrap defaults */
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
@@ -5898,29 +5897,8 @@ body {
   letter-spacing: 1px;
   border-color: transparent; }
 
-.jumbotron {
-  padding-top: 0;
-  padding-bottom: 0;
-  margin-bottom: 50px;
-  overflow-x: hidden; }
-
-/* landing specific styles */
 h1.heading {
   margin-bottom: 60px; }
-
-.toMainContent {
-  position: absolute;
-  top: 650px;
-  width: 100%;
-  text-align: center;
-  opacity: 0.7; }
-  .toMainContent .fa-angle-down {
-    color: #FFF;
-    transition: all 0.5s ease-out; }
-    .toMainContent .fa-angle-down:hover {
-      position: relative;
-      top: 2px;
-      opacity: 0.5; }
 
 hr.divider {
   margin-top: 60px auto; }
@@ -5934,17 +5912,32 @@ hr.divider {
     hr.divider {
       width: 1170px; } }
 
-.feature-divider {
-  margin: 60px 0;
-  /* Space out the Bootstrap <hr> more */ }
-
 .jumbotron {
+  /* override Bootstrap defaults */
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 50px;
+  overflow-x: hidden;
+  /* Specific landing styles */
   height: 700px;
   color: #eeeeee;
   background: url("../images/background.png");
   background-size: cover;
   background-repeat: no-repeat;
   line-height: 1.5; }
+  .jumbotron .toMainContent {
+    position: absolute;
+    top: 650px;
+    width: 100%;
+    text-align: center;
+    opacity: 0.7; }
+    .jumbotron .toMainContent .fa-angle-down {
+      color: #FFF;
+      transition: all 0.5s ease-out; }
+      .jumbotron .toMainContent .fa-angle-down:hover {
+        position: relative;
+        top: 2px;
+        opacity: 0.5; }
   .jumbotron .container {
     max-width: 100%;
     display: flex;
@@ -5983,6 +5976,10 @@ hr.divider {
         top: 5px;
         padding-right: 10px; }
 
+/* Space out the hr for the featurette more */
+.feature-divider {
+  margin: 60px 0; }
+
 /* Center align the text within the three columns below the carousel */
 .marketing {
   margin-top: 60px;
@@ -6001,6 +5998,9 @@ hr.divider {
     margin-left: 40px;
     padding: 0 10px; }
 
+.partners img {
+  margin: 40px auto; }
+
 .footer {
   width: 100%;
   padding: 20px 0;
@@ -6013,9 +6013,6 @@ hr.divider {
     .footer a.links:hover {
       color: #a2a2a2;
       text-decoration: none; }
-
-.partners img {
-  margin: 40px auto; }
 
 /* Responsive CSS
 -------------------------------------------------- */

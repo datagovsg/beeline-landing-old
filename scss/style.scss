@@ -1,11 +1,10 @@
 @import "bootstrap";
-/* override Bootstrap defaults */
+
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
   overflow-x: hidden;
 }
-
 
 .navbar {
   margin-bottom: 0;
@@ -13,35 +12,10 @@ body {
   border-color: transparent;
 }
 
-.jumbotron {
-  padding-top: 0;
-  padding-bottom: 0;
-  margin-bottom: 50px;
-  overflow-x: hidden;
-}
-
-/* landing specific styles */
 
 h1.heading {
     margin-bottom: $padding-large-vertical*6;
   }
-
-.toMainContent {
-  position: absolute;
-  top: 650px;
-  width: 100%;
-  text-align: center;
-  opacity: 0.7;
-  .fa-angle-down {
-    color: $white;
-    transition: all 0.5s ease-out;
-    &:hover {
-      position: relative;
-      top: 2px;
-      opacity: 0.5;
-    }
-  }
-}
 
 hr.divider{
     margin-top: $landing-margin auto;
@@ -57,19 +31,38 @@ hr.divider{
 }
 
 
-.feature-divider {
-  margin: $landing-margin 0;
-  /* Space out the Bootstrap <hr> more */
-}
-
 .jumbotron {
+  /* override Bootstrap defaults */
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 50px;
+  overflow-x: hidden;
+  /* Specific landing styles */
   height: 700px;
   color: $gray-lighter;
   background: url("../images/background.png");
   background-size: cover;
   background-repeat: no-repeat;
   line-height: $jumbotron-line-height;
-    
+
+
+  .toMainContent {
+    position: absolute;
+    top: 650px;
+    width: 100%;
+    text-align: center;
+    opacity: 0.7;
+    .fa-angle-down {
+      color: $white;
+      transition: all 0.5s ease-out;
+      &:hover {
+        position: relative;
+        top: 2px;
+        opacity: 0.5;
+      }
+    }
+  }
+
   .container {
     max-width: 100%;
     display: flex;
@@ -122,6 +115,11 @@ hr.divider{
   }
 }
 
+  /* Space out the hr for the featurette more */
+.feature-divider {
+  margin: $landing-margin 0;
+}
+
 /* Center align the text within the three columns below the carousel */
 .marketing {
   margin-top: $landing-margin;
@@ -135,7 +133,7 @@ hr.divider{
       width: 100px;
     }
   }
-    
+
   h3 {
     font-weight: normal;
   }
@@ -145,6 +143,12 @@ hr.divider{
       margin-left: 40px;
       padding: 0 $padding-large-vertical;
     }
+  }
+}
+
+.partners {
+  img {
+    margin: 40px auto;
   }
 }
 
@@ -165,11 +169,7 @@ hr.divider{
   }
 }
 
-.partners {
-  img {
-    margin: 40px auto;
-  }
-}
+
 /* Responsive CSS
 -------------------------------------------------- */
 /*==========  Mobile First Method  ==========*/
