@@ -1,0 +1,23 @@
+{
+  "name": "beeline-landing",
+  "version": "1.0.0",
+  "description": "beeline static landing",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "http-server -p 8090 ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/datagovsg/beeline-landing.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/datagovsg/beeline-landing/issues"
+  },
+  "homepage": "https://github.com/datagovsg/beeline-landing#readme",
+  "dependencies": {
+    "http-server": "^0.9.0"
+  }
+}
