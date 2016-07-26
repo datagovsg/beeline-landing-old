@@ -5912,6 +5912,58 @@ hr.divider {
     hr.divider {
       width: 1170px; } }
 
+.hand {
+  position: absolute;
+  background: url("../images/beelineAppHand.png");
+  background-repeat: no-repeat;
+  display: block;
+  height: 820px;
+  width: 690px;
+  top: -50px;
+  right: -220px;
+  transform: scale(0.6, 0.6); }
+  @media (min-width: 768px) {
+    .hand {
+      position: absolute;
+      background: url("../images/beelineAppHand.png");
+      background-repeat: no-repeat;
+      display: block;
+      height: 820px;
+      width: 690px;
+      top: 100px;
+      right: -400px;
+      transform: scale(1, 1); } }
+  @media (min-width: 992px) {
+    .hand {
+      right: -200px; } }
+  @media (min-width: 1200px) {
+    .hand {
+      right: -100px; } }
+  @media (min-width: 1440px) {
+    .hand {
+      right: 0; } }
+
+.badgeRow {
+  text-align: center; }
+  @media (min-width: 768px) {
+    .badgeRow {
+      text-align: left; } }
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: 0px; }
+    @media (min-width: 768px) {
+      .badgeRow .badgeCol-2 {
+        left: -160px; } }
+    @media (min-width: 992px) {
+      .badgeRow .badgeCol-2 {
+        left: -30px; } }
+    @media (min-width: 1200px) {
+      .badgeRow .badgeCol-2 {
+        left: -80px; } }
+    @media (min-width: 1440px) {
+      .badgeRow .badgeCol-2 {
+        left: -80px; } }
+
 .jumbotron {
   /* override Bootstrap defaults */
   padding-top: 0;
@@ -5931,6 +5983,9 @@ hr.divider {
     width: 100%;
     text-align: center;
     opacity: 0.7; }
+    @media only screen and (max-width: 480px) {
+      .jumbotron .toMainContent {
+        display: none; } }
     .jumbotron .toMainContent .fa-angle-down {
       color: #FFF;
       transition: all 0.5s ease-out; }
@@ -5945,7 +6000,14 @@ hr.divider {
     align-items: center;
     height: 100%; }
     .jumbotron .container .row {
-      padding: 5px 0; }
+      position: absolute;
+      top: 500px; }
+      @media (min-width: 768px) {
+        .jumbotron .container .row {
+          position: static;
+          top: 0;
+          padding: 5px 0;
+          text-align: left; } }
     .jumbotron .container .appBadgeBtn img {
       height: 60px;
       margin-bottom: 10px;
@@ -6013,105 +6075,3 @@ hr.divider {
     .footer a.links:hover {
       color: #a2a2a2;
       text-decoration: none; }
-
-/* Responsive CSS
--------------------------------------------------- */
-/*==========  Mobile First Method  ==========*/
-/* Custom, iPhone Retina */
-@media only screen and (min-width: 320px) and (max-device-width: 480px) {
-  .toMainContent {
-    display: none; }
-
-  .jumbotron .hand {
-    right: 0;
-    top: 0;
-    left: 0;
-    display: inline;
-    position: absolute;
-    height: 50%;
-    width: 50%;
-    z-index: 100; }
-  .jumbotron .jumbotronContent {
-    position: relative;
-    float: left; }
-
-  footer {
-    text-align: center; } }
-/* Extra Small Devices, Phones */
-@media only screen and (min-width: 480px) and (max-device-width: 768px) {
-  .toMainContent {
-    display: none; } }
-/* Small Devices, Tablets */
-@media only screen and (min-width: 768px) and (max-device-width: 992px) {
-  .badgeRow .badgeCol-2 {
-    position: relative;
-    left: -160px; }
-
-  /* Bump up size of feature-heading */
-  .feature-heading {
-    font-size: 45px; }
-
-  .hand {
-    position: absolute;
-    background: url("../images/beelineAppHand.png");
-    background-repeat: no-repeat;
-    height: 820px;
-    width: 690px;
-    top: 100px;
-    right: -400px; }
-
-  .heatmap {
-    position: relative;
-    top: 0; } }
-/* Medium Devices, Desktops */
-@media only screen and (min-width: 992px) and (max-device-width: 1200px) {
-  .feature-heading {
-    margin-top: 120px; }
-
-  .badgeRow .badgeCol-2 {
-    position: relative;
-    left: -30px; }
-
-  .hand {
-    position: absolute;
-    background: url("../images/beelineAppHand.png");
-    background-repeat: no-repeat;
-    height: 820px;
-    width: 690px;
-    top: 100px;
-    right: -200px; }
-
-  .heatmap {
-    position: relative;
-    top: 120px; } }
-/* Large Devices, Wide Screens */
-@media only screen and (min-width: 1200px) and (max-device-width: 1442px) {
-  .badgeRow .badgeCol-2 {
-    position: relative;
-    left: -80px; }
-
-  .hand {
-    position: absolute;
-    background: url("../images/beelineAppHand.png");
-    background-repeat: no-repeat;
-    height: 820px;
-    width: 690px;
-    top: 100px;
-    right: -100px; } }
-/* Super Large Devices, Super Wide Screens */
-@media only screen and (min-width: 1442px) {
-  .badgeRow .badgeCol-2 {
-    position: relative;
-    left: -80px; }
-
-  .hand {
-    position: absolute;
-    background: url("../images/beelineAppHand.png");
-    background-repeat: no-repeat;
-    height: 820px;
-    width: 690px;
-    top: 100px;
-    right: 0; } }
-.suggest {
-  padding-top: 20px;
-  padding-bottom: 30px; }
