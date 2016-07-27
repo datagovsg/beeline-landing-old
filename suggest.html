@@ -15,6 +15,8 @@
   <meta property="og:image" content="https://datagovsg.github.io/beeline-landing/images/beelineAppCover.png" />
   <meta name="google-signin-client_id" content="225350353651-lulsqicl7nrv40qt2pqpog2sgtpdkgjv.apps.googleusercontent.com">
 
+  <script src="//cdn.auth0.com/js/lock/10.0/lock.min.js"></script>
+
   <!--Mobile Specific Metas-->
   <!-- <meta name="viewport" content="width=device-width, initial-scale=1"> -->
 
@@ -30,10 +32,8 @@
   <!--JS-->
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
   <script src="js/bootstrap.js"></script>
-  <script src="js/bootstrap.js"></script>
   <script src="https://use.fontawesome.com/e1c177a50d.js"></script>
   <script src="js/wow.min.js"></script>
-  <script src="js/landing.js"></script>
 
   <!--Favicon-->
   <link rel="icon" type="image/png" href="images/favicon.png">
@@ -78,60 +78,61 @@
     </div>
   </nav>
   <form class="container suggest" @submit="submit" v-cloak id="submit-form">
-    <validator name="validation">
-      <h1 class="heading">Suggest a new route</h1>
-      <div class="row">
-        <div class="col-lg-7 col-md-6 col-sm-12">
+    <h1 class="heading">Suggest a new route</h1>
+    <div class="row">
+      <div class="col-lg-7 col-md-6 col-sm-12">
 
-          <google-map :center="center" :zoom="zoom" @g-click="click"
-            v-ref:map>
-            <google-marker v-if="suggestion.origin"
-                            :position="suggestion.origin"
-                            label="S">
-            </google-marker>
-            <google-marker v-if="suggestion.destination"
-                            :position="suggestion.destination"
-                            label="E">
-            </google-marker>
-            <google-polyline v-if="path" :path="path">
-            </google-polyline>
-          </google-map>
+        <google-map :center="center" :zoom="zoom" @g-click="click"
+          v-ref:map :options="{
+            clickableIcons: false,
+            disableDefaultUi: true,
+          }">
+          <google-marker v-if="suggestion.origin"
+                          :position="suggestion.origin"
+                          label="S">
+          </google-marker>
+          <google-marker v-if="suggestion.destination"
+                          :position="suggestion.destination"
+                          label="E">
+          </google-marker>
+          <google-polyline v-if="path" :path="path">
+          </google-polyline>
+        </google-map>
 
+        <div v-if="focusAt">
+          Click anywhere on the map to set the {{focusAt === 'origin' ? 'start' : 'end'}}
+          address.
         </div>
-        <div class="col-lg-5 col-md-6 col-sm-12">
-          <form>
-            <div class="form-group" v-validate-class>
-              <!-- Dummy input for validation -->
-              <input type="text" v-model="suggestion.origin"
-                v-validate:origin="{required: true}" hidden="true">
-
-              <label>Start address</label>
-                <place-input placeholder="Street, Postal code, Building name, etc."
-                  :bounds="Singapore"
-                  :place.sync="suggestion.originPlace"
-                  @g-place_changed="placeChanged('origin')"
-                  class="form-control">
-                </place-input>
-              </label>
-            </div>
-            <div class="form-group" v-validate-class>
-              <!-- Dummy input for validation -->
-              <input type="text" v-model="suggestion.destination"
-                v-validate:destination="{required: true}" hidden="true">
-
-              <label>End address
-                <place-input placeholder="Street, Postal code, Building name, etc."
-                  :bounds="Singapore"
-                  :place.sync="suggestion.destinationPlace"
-                  @g-place_changed="placeChanged('destination')"
-                  class="form-control">
-                </place-input>
-              </label>
-            </div>
-            <div class="form-group">
-              <label for="exampleInputPassword1">Time at Destination</label>
+      </div>
+      <div class="col-lg-5 col-md-6 col-sm-12">
+          <div class="form-group form-inline">
+            <label>
+              Start address
+              <input type="text"
+                placeholder="Street, Postal code, Building name, etc."
+                class="form-control"
+                v-place-autocomplete
+                v-model="suggestion.originText"
+                place="suggestion.originPlace"
+                @focus="focusIn('origin')">
+            </label>
+          </div>
+          <div class="form-group form-inline">
+            <label>
+              End address
+              <input type="text"
+                placeholder="Street, Postal code, Building name, etc."
+                class="form-control"
+                v-place-autocomplete
+                v-model="suggestion.destinationText"
+                place="suggestion.destinationPlace"
+                @focus="focusIn('destination')">
+            </label>
+          </div>
+          <div class="form-group form-inline">
+            <label>
+              Time at Destination
               <select class="form-control" v-model="arrivalTime"
-                  v-validate:arrival-time="{required: true}"
                   @focus="zoomOut()">
                 <optgroup label="AM">
                   <option value="06:00">6:00 AM</option>
@@ -146,34 +147,85 @@
                   <option value="8:00">8:00 PM</option>
                 </optgroup>
               </select>
-            </div>
-            <div class="form-group">
-              <label for="exampleInputEmail1">Email Address</label>
+            </label>
+          </div>
+          <div class="form-group">
+            <label>
+              Email Address
               <input type="email" class="form-control" v-model="email" placeholder="Email"
-                :disabled="emailVerification"
-                v-validate:email="validators.email">
-            </div>
+                :disabled="emailVerification">
+            </label>
 
-            <div class="checkbox">
-              <label>
-                <input type="checkbox"> Yes, I read and agree to Beeline's <a>Privacy Policy</a> and <a>Terms of use</a>.
-              </label>
-            </div>
-            <div class="pull-left">
-              <div class="g-signin2" data-onsuccess="onSignIn"></div>
-              <button type="submit" class="btn btn-default webApp"
-                :disabled="!$validation.valid">
-                Submit Route Suggestion
+            <div>
+              <button class="btn btn-default" @click="login" type="button">
+                Verify your email...
               </button>
+              <!-- END: Authentication providers -->
+
+              Verify your email now to skip verification later.
             </div>
+          </div>
 
-          </form>
-
-
-        </div>
-
+          <div class="checkbox">
+            <label>
+              <input type="checkbox" v-model="agreeTerms">
+              Yes, I read and agree to Beeline's <a>Privacy Policy</a> and <a>Terms of use</a>.
+            </label>
+          </div>
+          <div class="pull-left">
+            <button type="submit" class="btn btn-primary webApp"
+              :disabled="!formValid">
+              Submit Route Suggestion
+            </button>
+          </div>
       </div>
-    </validator>
+    </div>
+
+    <div class="modal fade" tabindex="-1" role="dialog" id="submitted-dialog">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            <h4 class="modal-title">Suggestion submitted</h4>
+          </div>
+          <div class="modal-body">
+            <p v-if="emailVerification">
+              Thank you. Your suggestion has been submitted!
+            </p>
+            <p v-else>
+              Thank you. Your suggestion has been received!
+              We will add it to our suggestions database once you have verified
+              your email address.
+              Please check your email inbox for further instructions.
+            </p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-default" data-dismiss="modal">
+              Back to Home
+            </button>
+          </div>
+        </div><!-- /.modal-content -->
+      </div><!-- /.modal-dialog -->
+    </div><!-- /.modal -->
+
+    <div class="modal fade" tabindex="-1" role="dialog" id="submitted-error-dialog">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            <h4 class="modal-title">Error submitting suggestion</h4>
+          </div>
+          <div class="modal-body">
+            <p>Sorry, there was a server error. Please try again later.</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-default" data-dismiss="modal">
+              Back to Home
+            </button>
+          </div>
+        </div><!-- /.modal-content -->
+      </div><!-- /.modal-dialog -->
+    </div><!-- /.modal -->
   </form>
 
   <!-- /.row -->
@@ -192,13 +244,9 @@
     </div>
   </footer>
 
-  <!-- 3rd party authentication -->
-  <script src="https://apis.google.com/js/platform.js" async defer></script>
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/1.0.26/vue.js"></script>
   <script src="https://cdn.jsdelivr.net/vue.resource/0.9.3/vue-resource.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.13.1/lodash.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/vue.validator/2.1.4/vue-validator.min.js"></script>
   <script src="js/vue-google-maps.js"></script>
   <script src="js/suggest.js"></script>
 </body>

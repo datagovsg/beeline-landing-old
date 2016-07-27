@@ -1,53 +1,17 @@
-
-Vue.use(VueValidator);
-Vue.component('placeInput', VueGoogleMap.PlaceInput);
-
 Vue.component('googleMap', VueGoogleMap.Map)
 Vue.component('googleMarker', VueGoogleMap.Marker)
 Vue.component('googlePolyline', VueGoogleMap.Polyline)
-Vue.component('suggestPreview', {
-  template: `
-<google-map :center="center" :zoom="zoom" @g-click="click">
-  <google-marker v-if="suggestion.origin"
-                  :position="suggestion.origin">
-  </google-marker>
-  <google-marker v-if="suggestion.destination"
-                  :position="suggestion.destination">
-  </google-marker>
-  <google-polyline v-if="path" :path="path">
-  </google-polyline>
-</google-map>
-  `,
-  props: ['centerAt', 'suggestion'],
-  data() {
-    return {
-    }
-  },
-  computed: {
-    path() {
-      if (_.get(this.suggestion, 'origin') &&
-          _.get(this.suggestion, 'destination')) {
-        return [
-          this.suggestion.origin,
-          this.suggestion.destination
-        ]
-      }
-      return false;
-    }
-  },
-  methods: {
-    click(events) {
-      this.centerAt = {
-        lat: events.latLng.lat(),
-        lng: events.latLng.lng(),
-      }
-    },
-  },
-  events: {
-    zoom() {
-      this.center = this.centerAt;
-      this.zoom = 15;
-    }
+
+Vue.directive('place-autocomplete', {
+  params: ['place', 'bounds'],
+  bind() {
+    VueGoogleMap.loaded.then(() => {
+      var autocomplete = new google.maps.places.Autocomplete(this.el);
+
+      autocomplete.addListener('place_changed', (event) => {
+        this.vm.$set(this.params.place, autocomplete.getPlace())
+      })
+    })
   }
 })
 
@@ -85,17 +49,36 @@ var vue = new Vue({
       originPlace: undefined,
       destination: undefined,
       destinationPlace: undefined,
-      arrivalTime: undefined,
+      originText: '',
+      destinationText: '',
     },
-    validators: {
-      email: {
-        pattern: '/[^@\\s]+@[^@\\s\\.]+(\\.[^@\\s\\.]+)+/i',
-      }
-    },
+    arrivalTime: undefined,
     emailVerification: null,
-    email: ''
+    email: '',
+    agreeTerms: false,
+    focusAt: null,
+    lock: new Auth0Lock(
+      'PwDT8IepW58tRCqZlLQkFKxKpuYrgNAp',
+      'beeline-suggestions.auth0.com', {
+        auth: {
+          redirect: false,
+          params: {
+            scope: 'openid name email'
+          }
+        },
+        autoclose: true,
+      }),
   },
   computed: {
+    formValid() {
+      return _.every([
+        this.suggestion.origin,
+        this.suggestion.destination,
+        this.email,
+        this.arrivalTime,
+        this.agreeTerms
+      ])
+    },
     path() {
       if (_.get(this.suggestion, 'origin') &&
           _.get(this.suggestion, 'destination')) {
@@ -108,48 +91,100 @@ var vue = new Vue({
     }
   },
   watch: {
-    'suggestion.destinationPlace'(place) {
-      if (place) {
-        this.suggestion.destination = place.geometry.location
-        this.zoomIn(this.suggestion.destination);
-      }
-    },
     'suggestion.originPlace'(place) {
-      if (place) {
+      if (place && place.geometry) {
         this.suggestion.origin = place.geometry.location
         this.zoomIn(this.suggestion.origin);
       }
-    }
+      else {
+        console.log(place);
+      }
+    },
+    'suggestion.destinationPlace'(place) {
+      if (place && place.geometry) {
+        this.suggestion.destination = place.geometry.location
+        this.zoomIn(this.suggestion.destination);
+      }
+      else {
+        console.log(place);
+      }
+    },
+  },
+  created() {
+    this.geocoderPromise = VueGoogleMap.loaded.then(() => {
+      return new google.maps.Geocoder;
+    })
+  },
+  ready() {
+    this.lock.on('authenticated', (authResult) => {
+      this.lock.getProfile(authResult.idToken, (error, profile) => {
+        if (error) {
+          alert("Your email could not be verified");
+          return;
+        }
+
+        this.email = profile.email;
+        this.emailVerification = {
+          type: 'auth0',
+          data: authResult.idToken,
+        };
+      });
+    })
   },
   methods: {
     submit(event) {
       event.preventDefault();
-      this.$http.post('https://api.beeline.sg/suggestions/web', {
-        arrivalTime: this.arrivalTime,
-        boardLat: this.suggestion.origin[0],
-        boardLon: this.suggestion.origin[1],
-        alightLat: this.suggestion.destination[0],
-        alightLon: this.suggestion.destination[1],
+
+      // compute time as seconds past midnight
+      var splitTime = this.arrivalTime.split(':')
+      var time = splitTime[0] * 3600000 + splitTime[1] * 60000;
+
+      this.$http.post('http://localhost:8080/suggestions/web', {
+        time: time,
+        boardLat: this.suggestion.origin.lat(),
+        boardLon: this.suggestion.origin.lng(),
+        alightLat: this.suggestion.destination.lat(),
+        alightLon: this.suggestion.destination.lng(),
         email: this.email,
         emailVerification: this.emailVerification
       })
       .then((success) => {
-        alert('Submitted!')
+        $('#submitted-dialog').modal('show')
+          .on('hidden.bs.modal', () => {
+            window.location.href="/index.html"
+          });
+
+        this.time = null;
+        this.suggestion = {
+          origin: null, destination: null, originPlace: null,
+          destinationPlace: null
+        };
       }, (error) => {
-        alert('Error')
+        $('#submitted-error-dialog').modal('show');
       })
     },
     click(event) {
+      if (this.focusAt) {
+        var focusAt = this.focusAt;
+        this.suggestion[this.focusAt] = event.latLng;
 
+        // Reverse geocode...
+        this.geocoderPromise.then((geocoder) => {
+          geocoder.geocode({location: event.latLng}, (results, status) => {
+            if (status === google.maps.GeocoderStatus.OK) {
+              if (results[0]) {
+                this.$set('suggestion.' + focusAt + 'Text',
+                          results[0].formatted_address);
+              }
+            }
+          })
+        })
+      }
     },
     placeChanged(which) {
-      // Update validation
-      this.$validate(which);
-
-      //
+      console.log(which);
     },
     zoomIn(where) {
-      console.log(where);
       this.center = where;
       this.zoom = 15;
     },
@@ -164,25 +199,33 @@ var vue = new Vue({
         this.center = INIT.center;
         this.zoom = INIT.zoom;
       }
+    },
+    focusIn(which) {
+      this.focusAt = which;
+    },
+    focusOut(which) {
+      if (this.focusAt === which) {
+        this.focusAt = null;
+      }
+    },
+    login() {
+      this.lock.show({
+        responseType: 'token',
+      }, (error, profile, idToken) => {
+        if (error) {
+          alert("Your email could not be verified");
+          return;
+        }
+
+        this.email = profile.email;
+        this.emailVerification = {
+          type: 'auth0',
+          data: idToken,
+        }
+      })
     }
   }
 })
-
-function onSignIn(googleUser) {
-  var profile = googleUser.getBasicProfile();
-
-  vue.emailVerification = {
-    type: 'Google',
-    data: googleUser.getAuthResponse().id_token
-  };
-  vue.email = profile.getEmail();
-}
-function signOut() {
-  var auth2 = gapi.auth2.getAuthInstance();
-  auth2.signOut().then(function () {
-    console.log('User signed out.');
-  });
-}
 
 VueGoogleMap.loaded.then(() => {
   vue.Singapore = new google.maps.LatLngBounds(
