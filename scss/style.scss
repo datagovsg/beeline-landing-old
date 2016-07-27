@@ -75,16 +75,21 @@ hr.divider {
   margin: $landing-margin auto;
   @media (min-width: $screen-tablet) {
     width: $container-sm;
-    margin-top: 10px auto;
+    margin-top: $landing-margin/3 auto;
   }
   @media (min-width: $screen-desktop) {
     width: $container-md;
-    margin-top: 20px auto;
+    margin-top: $landing-margin/2 auto;
   }
   @media (min-width: $screen-lg-desktop) {
     width: $container-lg;
-    margin-top: 30px auto;
+    margin-top: $landing-margin auto;
   }
+}
+
+/* Space out the hr for the featurette more */
+hr.feature-divider {
+  margin: $landing-margin 0;
 }
 
 /* =============================== Junk Styles ===============================  */
@@ -174,16 +179,27 @@ hr.divider {
 }
 
 .reminder {
+  @media (max-width: $screen-phone) {
+    top:30px;
+    margin: 0 auto;
+    width:100%;
+  }
   p {
     float: left;
     color: lighten($brand-primary, 50%);
     font-size: $font-size-small;
-    width: 80%;
+    width: 85%;
+    @media (max-width: $screen-phone) {
+      color: $gray-dark;
+    }
   }
   .fa-2x {
     color: lighten($brand-primary, 50%);
     opacity: 0.8;
     filter: alpha(opacity=80);
+    @media (max-width: $screen-phone) {
+      color: $gray-dark;
+    }
     /* For IE8 and earlier */
     .fa-refresh {
       position: relative;
@@ -195,20 +211,6 @@ hr.divider {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-/* Space out the hr for the featurette more */
-.feature-divider {
-  margin: $landing-margin 0;
-}
 /* Center align the text within the three columns below the carousel */
 .marketing {
   margin-top: $landing-margin;
@@ -298,46 +300,41 @@ hr.divider {
 }
 
 .mobileShow {
-    display:none;
+  display: none;
   @media (max-width: $screen-phone) {
-    display:inline;
-    padding-left: 10px;
-    padding-right: 10px;
+    display: block;
+  }
+}
 
-    .mobileBadges{
-      margin: 5px 10px;
-        .mobileBadge{
-          padding: 5px;
-        }
-        .btn{
-          margin: 5px 0px;
-          white-space: normal;
-          width: 100%;
-          }
-      }
+.mobileShow.container{
+  padding: 0 20px;
+}
 
+.mobileHide {
+  display: inline;
+  @media (max-width: $screen-phone) {
+    display: none;
+  }
+}
 
-  .reminder {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    align-items: flex-start;
-    justify-content: center;
-    align-content: stretch;
-    text-align: center;
-    margin: 20px 20px;
+.mobileBadges {
+  padding: 0px;
+  position: relative;
+  top: 10px;
 
-    .fa-refresh{
-      position: relative;
-      top: 5px;
-      padding-right: 10px;
-      }
-
+   .mobileBadge1, .mobileBadge2 {
+    padding: 0px;
     }
 
-    hr.divider{
-      margin: 10px auto;
+    .mobileBadge2 {
+      padding-left: 5px;
     }
+
+.btn {
+  white-space: normal;
+  width: 100%;
+  position: relative;
+  top:10px;
   }
 
 }

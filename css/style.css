@@ -5219,7 +5219,7 @@ button.close {
 
 .modal-body {
   position: relative;
-  padding: 20px; }
+  padding: 30px; }
 
 .modal-footer {
   padding: 20px;
@@ -5247,7 +5247,7 @@ button.close {
 
 @media (min-width: 768px) {
   .modal-dialog {
-    width: 600px;
+    width: 60%;
     margin: 30px auto; }
 
   .modal-content {
@@ -5255,10 +5255,10 @@ button.close {
     box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5); }
 
   .modal-sm {
-    width: 300px; } }
+    width: 30%; } }
 @media (min-width: 992px) {
   .modal-lg {
-    width: 900px; } }
+    width: 90%; } }
 .tooltip {
   position: absolute;
   z-index: 1070;
@@ -5950,19 +5950,23 @@ h1.heading {
   margin-bottom: 60px; }
 
 hr.divider {
-  margin: 30px auto; }
+  margin: 60px auto; }
   @media (min-width: 768px) {
     hr.divider {
       width: 750px;
-      margin-top: 10px auto; } }
+      margin-top: 20px auto; } }
   @media (min-width: 992px) {
     hr.divider {
       width: 970px;
-      margin-top: 20px auto; } }
+      margin-top: 30px auto; } }
   @media (min-width: 1200px) {
     hr.divider {
       width: 1170px;
-      margin-top: 30px auto; } }
+      margin-top: 60px auto; } }
+
+/* Space out the hr for the featurette more */
+hr.feature-divider {
+  margin: 60px 0; }
 
 /* =============================== Junk Styles ===============================  */
 /* Jumbotron Flex Section */
@@ -6028,30 +6032,37 @@ hr.divider {
   .webApp.btn-lg, .btn-group-lg > .webApp.btn {
     padding: 10px 24px; }
 
+@media (max-width: 480px) {
+  .reminder {
+    top: 30px;
+    margin: 0 auto;
+    width: 100%; } }
 .reminder p {
   float: left;
   color: #cabeda;
   font-size: 16px;
-  width: 80%; }
+  width: 85%; }
+  @media (max-width: 480px) {
+    .reminder p {
+      color: #333333; } }
 .reminder .fa-2x {
   color: #cabeda;
   opacity: 0.8;
   filter: alpha(opacity=80);
   /* For IE8 and earlier */ }
+  @media (max-width: 480px) {
+    .reminder .fa-2x {
+      color: #333333; } }
   .reminder .fa-2x .fa-refresh {
     position: relative;
     float: left;
     top: 5px;
     padding-right: 10px; }
 
-/* Space out the hr for the featurette more */
-.feature-divider {
-  margin: 30px 0; }
-
 /* Center align the text within the three columns below the carousel */
 .marketing {
-  margin-top: 30px;
-  margin-bottom: 30px; }
+  margin-top: 60px;
+  margin-bottom: 60px; }
   .marketing .col-lg-4 {
     margin-top: 10px;
     margin-bottom: 10px;
@@ -6123,29 +6134,27 @@ hr.divider {
   display: none; }
   @media (max-width: 480px) {
     .mobileShow {
-      display: inline;
-      padding-left: 10px;
-      padding-right: 10px; }
-      .mobileShow .mobileBadges {
-        margin: 5px 10px; }
-        .mobileShow .mobileBadges .mobileBadge {
-          padding: 5px; }
-        .mobileShow .mobileBadges .btn {
-          margin: 5px 0px;
-          white-space: normal;
-          width: 100%; }
-      .mobileShow .reminder {
-        display: flex;
-        flex-direction: row;
-        flex-wrap: nowrap;
-        align-items: flex-start;
-        justify-content: center;
-        align-content: stretch;
-        text-align: center;
-        margin: 20px 20px; }
-        .mobileShow .reminder .fa-refresh {
-          position: relative;
-          top: 5px;
-          padding-right: 10px; }
-      .mobileShow hr.divider {
-        margin: 10px auto; } }
+      display: block; } }
+
+.mobileShow.container {
+  padding: 0 20px; }
+
+.mobileHide {
+  display: inline; }
+  @media (max-width: 480px) {
+    .mobileHide {
+      display: none; } }
+
+.mobileBadges {
+  padding: 0px;
+  position: relative;
+  top: 10px; }
+  .mobileBadges .mobileBadge1, .mobileBadges .mobileBadge2 {
+    padding: 0px; }
+  .mobileBadges .mobileBadge2 {
+    padding-left: 5px; }
+  .mobileBadges .btn {
+    white-space: normal;
+    width: 100%;
+    position: relative;
+    top: 10px; }

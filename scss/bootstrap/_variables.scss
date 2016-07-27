@@ -596,7 +596,7 @@ $label-link-hover-color:      #fff !default;
 //##
 
 //** Padding applied to the modal body
-$modal-inner-padding:         20px !default;
+$modal-inner-padding:         30px !default;
 
 //** Padding applied to the modal title
 $modal-title-padding:         20px !default;
@@ -619,9 +619,9 @@ $modal-header-border-color:   #e5e5e5 !default;
 //** Modal footer border color
 $modal-footer-border-color:   $modal-header-border-color !default;
 
-$modal-lg:                    900px !default;
-$modal-md:                    600px !default;
-$modal-sm:                    300px !default;
+$modal-lg:                    90% !default;
+$modal-md:                    60% !default;
+$modal-sm:                    30% !default;
 
 
 //== Alerts
@@ -881,5 +881,5 @@ $hr-border:                   $gray-lighter !default;
 //
 //##
 $footer-height:               60px;
-$landing-margin:              30px;
+$landing-margin:              60px;
 $jumbotron-height:            700px;
