@@ -34,7 +34,7 @@ hr.divider {
   right: -230px;
   transform: scale(0.6);
   z-index: 0;
-  @media (min-width: $screen-xs-min) {
+  @media (min-width: $screen-sm-min) {
     position: absolute;
     background: url("../images/beelineAppHand.png");
     background-repeat: no-repeat;
@@ -44,9 +44,6 @@ hr.divider {
     top: 15%;
     right: -400px;
     transform: scale(1);
-  }
-  @media (min-width: $screen-sm-min) {
-    right: -200px;
   }
   @media (min-width: $screen-md-min) {
     right: -200px;
