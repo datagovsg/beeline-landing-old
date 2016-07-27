@@ -40,12 +40,16 @@ body {
   display: block;
   max-height: 820px;
   max-width: 690px;
-  top: 10%;
   width: 100vw;
   height:auto;
-  right: -400px;
+  right: -15%;
+  top: 10%;
+
+
 
   @media (min-width: $screen-phone) {
+    width: 100vw;
+    height:auto;
     right: -400px;
     top: 10%;
   }
