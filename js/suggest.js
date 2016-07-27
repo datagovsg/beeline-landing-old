@@ -151,7 +151,7 @@ var vue = new Vue({
       .then((success) => {
         $('#submitted-dialog').modal('show')
           .on('hidden.bs.modal', () => {
-            window.location.href="/index.html"
+            window.location.href="/suggestSubmitted.html"
           });
 
         this.time = null;
