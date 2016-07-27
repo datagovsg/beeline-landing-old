@@ -5916,9 +5916,13 @@ hr.divider {
   position: absolute;
   background: url("../images/beelineAppHand.png");
   background-repeat: no-repeat;
-  display: none;
-  overflow-x: hidden; }
-  @media (min-width: 768px) {
+  height: 820px;
+  width: 690px;
+  top: 0px;
+  right: -230px;
+  transform: scale(0.6);
+  z-index: 0; }
+  @media (min-width: 480px) {
     .hand {
       position: absolute;
       background: url("../images/beelineAppHand.png");
@@ -5926,9 +5930,12 @@ hr.divider {
       display: block;
       height: 820px;
       width: 690px;
-      top: 100px;
+      top: 10%;
       right: -400px;
-      transform: scale(1, 1); } }
+      transform: scale(1); } }
+  @media (min-width: 768px) {
+    .hand {
+      right: -200px; } }
   @media (min-width: 992px) {
     .hand {
       right: -200px; } }
@@ -5941,7 +5948,7 @@ hr.divider {
 
 .badgeRow {
   text-align: center; }
-  @media (min-width: 768px) {
+  @media (min-width: 480px) {
     .badgeRow {
       text-align: left; } }
   .badgeRow .badgeCol-2 {
@@ -5979,9 +5986,6 @@ hr.divider {
     width: 100%;
     text-align: center;
     opacity: 0.7; }
-    @media only screen and (max-width: 480px) {
-      .jumbotron .toMainContent {
-        display: none; } }
     .jumbotron .toMainContent .fa-angle-down {
       color: #FFF;
       transition: all 0.5s ease-out; }
@@ -5989,46 +5993,49 @@ hr.divider {
         position: relative;
         top: 2px;
         opacity: 0.5; }
-  .jumbotron .container {
+  .jumbotron .jumbotronWrapper {
     max-width: 100%;
     display: flex;
     flex-direction: row;
     align-items: center;
     height: 100%; }
-    .jumbotron .container .row {
+    @media (max-width: 768px) {
+      .jumbotron .jumbotronWrapper {
+        display: inline; } }
+    .jumbotron .jumbotronWrapper .row {
       text-align: center;
       padding: 5px 0; }
       @media (min-width: 768px) {
-        .jumbotron .container .row {
+        .jumbotron .jumbotronWrapper .row {
           position: static;
           top: 0;
           padding: 5px 0;
           text-align: left; } }
-    .jumbotron .container .appBadgeBtn img {
+    .jumbotron .jumbotronWrapper .appBadgeBtn img {
       height: 60px;
       margin-bottom: 10px;
       border-radius: 8px; }
-      .jumbotron .container .appBadgeBtn img:hover {
+      .jumbotron .jumbotronWrapper .appBadgeBtn img:hover {
         -moz-box-shadow: 0 0 5px #FFF;
         -webkit-box-shadow: 0 0 5px #FFF;
         box-shadow: 0 0 5px #FFF; }
-    .jumbotron .container .webApp {
+    .jumbotron .jumbotronWrapper .webApp {
       margin-top: -10px;
       margin-bottom: 20px;
       vertical-align: middle; }
-      .jumbotron .container .webApp.btn-lg, .jumbotron .container .btn-group-lg > .webApp.btn {
+      .jumbotron .jumbotronWrapper .webApp.btn-lg, .jumbotron .jumbotronWrapper .btn-group-lg > .webApp.btn {
         padding: 10px 24px; }
-    .jumbotron .container .reminder p {
+    .jumbotron .jumbotronWrapper .reminder p {
       float: left;
       color: #cabeda;
       font-size: 16px;
       width: 80%; }
-    .jumbotron .container .reminder .fa-2x {
+    .jumbotron .jumbotronWrapper .reminder .fa-2x {
       color: #cabeda;
       opacity: 0.8;
       filter: alpha(opacity=80);
       /* For IE8 and earlier */ }
-      .jumbotron .container .reminder .fa-2x .fa-refresh {
+      .jumbotron .jumbotronWrapper .reminder .fa-2x .fa-refresh {
         position: relative;
         float: left;
         top: 5px;
@@ -6108,3 +6115,43 @@ hr.divider {
     list-style-position: outside;
     margin-left: 20px;
     padding-left: 10px; }
+
+@media (max-width: 480px) {
+  .mobileContent {
+    position: relative;
+    text-align: center; }
+
+  .jumbotron {
+    margin-bottom: 20px; }
+
+  .mobileTagline {
+    position: relative;
+    text-align: left;
+    top: 420px;
+    padding: 0 20px; }
+
+  .mobileBadges {
+    padding: 5px 10px; }
+    .mobileBadges .mobileBadge {
+      padding: 5px; }
+
+  .btn {
+    white-space: normal;
+    width: 100%; }
+
+  .reminder {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    justify-content: center;
+    align-content: stretch;
+    text-align: center;
+    margin: 20px 10px; }
+    .reminder .fa-refresh {
+      position: relative;
+      top: 5px;
+      padding-right: 10px; }
+
+  hr.divider {
+    margin: 10px auto; } }
