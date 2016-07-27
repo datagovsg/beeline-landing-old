@@ -1,4 +1,7 @@
 @import "bootstrap";
+
+/* =============================== Clean Styles ===============================  */
+
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
@@ -9,88 +12,11 @@ body {
   letter-spacing: 1px;
   border-color: transparent;
 }
-h1.heading {
-  margin-bottom: $padding-large-vertical*6;
-}
-hr.divider {
-  margin-top: $landing-margin auto;
-  @media (min-width: $screen-sm-min) {
-    width: $container-sm;
-  }
-  @media (min-width: $screen-md-min) {
-    width: $container-md;
-  }
-  @media (min-width: $screen-lg-min) {
-    width: $container-lg;
-  }
-}
-.hand {
-  position: absolute;
-  background: url("../images/beelineAppHand.png");
-  background-repeat: no-repeat;
-  height: 820px;
-  width: 690px;
-  top: 40px;
-  right: -230px;
-  transform: scale(0.6);
-  z-index: 0;
-  @media (min-width: $screen-sm-min) {
-    position: absolute;
-    background: url("../images/beelineAppHand.png");
-    background-repeat: no-repeat;
-    display: block;
-    height: 820px;
-    width: 690px;
-    top: 15%;
-    right: -400px;
-    transform: scale(1);
-  }
-  @media (min-width: $screen-md-min) {
-    right: -200px;
-  }
-  @media (min-width: $screen-lg-min) {
-    right: -100px;
-  }
-  @media (min-width: 1440px) {
-    right: 0;
-  }
-}
-.badgeRow {
-  text-align: center;
-  @media (min-width: $screen-xs-min) {
-    text-align: left;
-  }
-  .badgeCol-2 {
-    position: relative;
-    left: 0;
-    @media (min-width: $screen-sm-min) {
-      left: -160px;
-    }
-    @media (min-width: $screen-md-min) {
-      left: -30px;
-    }
-    @media (min-width: $screen-lg-min) {
-      left: -80px;
-    }
-    @media (min-width: 1440px) {
-      left: -80px;
-    }
-  }
-}
-.jumbotron {
-  /* override Bootstrap defaults */
-  padding-top: 0;
-  padding-bottom: 0;
-  margin-bottom: 50px;
-  overflow-x: hidden;
-  /* Specific landing styles */
-  height: 700px;
-  color: $gray-lighter;
-  background: url("../images/background.png");
-  background-size: cover;
-  background-repeat: no-repeat;
-  line-height: $jumbotron-line-height;
-  .toMainContent {
+
+.arrow {
+  display: none;
+  @media (min-width: $screen-phone) {
+    display: inline;
     position: absolute;
     top: 650px;
     width: 100%;
@@ -107,25 +33,105 @@ hr.divider {
       }
     }
   }
+}
+
+.hand {
+  position: absolute;
+  display: block;
+  max-height: 820px;
+  max-width: 690px;
+  top: 10%;
+  width: 100vw;
+  height:auto;
+  right: -400px;
+
+  @media (min-width: $screen-phone) {
+    right: -400px;
+    top: 10%;
+  }
+  @media (min-width: $screen-tablet) {
+    right: -300px;
+    top: 80px;
+  }
+  @media (min-width: $screen-desktop) {
+    right: -200px;
+    top: 80px;
+  }
+  @media (min-width: $screen-lg-desktop) {
+    right: -100px;
+    top: 80px;
+  }
+  @media (min-width: 1440px) {
+    right: 0px;
+    top: 80px;
+  }
+}
+
+h1.heading {
+  margin-bottom: $padding-large-vertical*6;
+}
+
+hr.divider {
+  margin: $landing-margin auto;
+  @media (min-width: $screen-tablet) {
+    width: $container-sm;
+    margin-top: 10px auto;
+  }
+  @media (min-width: $screen-desktop) {
+    width: $container-md;
+    margin-top: 20px auto;
+  }
+  @media (min-width: $screen-lg-desktop) {
+    width: $container-lg;
+    margin-top: 30px auto;
+  }
+}
+
+/* =============================== Junk Styles ===============================  */
+
+/* Jumbotron Flex Section */
+
+.jumbotron {
+  /* override Bootstrap defaults */
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 50px;
+  /* Specific landing styles */
+  height: $jumbotron-height;
+  color: $gray-lighter;
+  background: url("../images/background.png");
+  background-size: cover;
+  background-repeat: no-repeat;
+  line-height: $jumbotron-line-height;
+  overflow-x: hidden;
+
+  @media (max-width: $screen-phone) {
+    margin-bottom: 10px;
+  }
+
   .jumbotronWrapper {
     max-width: 100%;
     display: flex;
-    flex-direction: row;
-    align-items: center;
-    height: 100%;
-      @media (max-width: $screen-sm-min) {
-      display: inline;
-      }
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    align-content: stretch;
+    height: $jumbotron-height;
+
     .row {
-      text-align: center;
+      text-align: left;
       padding: 5px 0;
-      @media (min-width: $screen-sm-min) {
-        position: static;
-        top: 0;
-        padding: 5px 0;
-        text-align: left;
-      }
     }
+  }
+}
+
+
+/* App Badges Section */
+
+.appBadges {
+  text-align: center;
+
+  .badgeCol-1,.badgeCol-2{
     .appBadgeBtn {
       img {
         height: 60px;
@@ -138,36 +144,67 @@ hr.divider {
         }
       }
     }
-    .webApp {
-      margin-top: -10px;
-      margin-bottom: $padding-small-horizontal*2;
-      vertical-align: middle;
-      &.btn-lg {
-        padding: 10px 24px;
-      }
+  }
+
+  .badgeCol-2 {
+    position: relative;
+    left: 0px;
+    @media (min-width: $screen-tablet) {
+      left: -20px;
     }
-    .reminder {
-      p {
-        float: left;
-        color: lighten($brand-primary, 50%);
-        font-size: $font-size-small;
-        width: 80%;
-      }
-      .fa-2x {
-        color: lighten($brand-primary, 50%);
-        opacity: 0.8;
-        filter: alpha(opacity=80);
-        /* For IE8 and earlier */
-        .fa-refresh {
-          position: relative;
-          float: left;
-          top: 5px;
-          padding-right: $padding-small-horizontal;
-        }
-      }
+    @media (min-width: $screen-desktop) {
+      left: 100px;
+    }
+    @media (min-width: $screen-lg-desktop) {
+    left: 100px;
+    }
+    @media (min-width: 1440px) {
+    left: 100px;
     }
   }
 }
+
+.webApp {
+  margin-top: -10px;
+  margin-bottom: $padding-small-horizontal*2;
+  vertical-align: middle;
+  &.btn-lg {
+    padding: 10px 24px;
+  }
+}
+
+.reminder {
+  p {
+    float: left;
+    color: lighten($brand-primary, 50%);
+    font-size: $font-size-small;
+    width: 80%;
+  }
+  .fa-2x {
+    color: lighten($brand-primary, 50%);
+    opacity: 0.8;
+    filter: alpha(opacity=80);
+    /* For IE8 and earlier */
+    .fa-refresh {
+      position: relative;
+      float: left;
+      top: 5px;
+      padding-right: $padding-small-horizontal;
+    }
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
 /* Space out the hr for the featurette more */
 .feature-divider {
   margin: $landing-margin 0;
@@ -216,7 +253,7 @@ hr.divider {
       text-decoration: none;
     }
   }
-  @media (max-width: $screen-sm-min) {
+  @media (max-width: $screen-tablet) {
     text-align: center;
   }
 }
@@ -260,55 +297,47 @@ hr.divider {
   }
 }
 
-@media (max-width: $screen-xs-min) {
-  .mobileContent {
-    position: relative;
-    text-align: center;
-  }
-
-  .jumbotron {
-    margin-bottom: 20px;
-  }
-
-  .mobileTagline{
-    position: relative;
-    text-align: left;
-    top: 420px;
-    padding: 0 20px;
-  }
-
-.mobileBadges{
-  padding: 5px 10px;
-    .mobileBadge{
-      padding: 5px;
-    }
-  }
-
-.btn{
-  white-space: normal;
-  width: 100%;
-  }
-
-
-.reminder {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: flex-start;
-  justify-content: center;
-  align-content: stretch;
-  text-align: center;
-  margin: 20px 10px;
-
-  .fa-refresh{
-    position: relative;
-    top: 5px;
+.mobileShow {
+    display:none;
+  @media (max-width: $screen-phone) {
+    display:inline;
+    padding-left: 10px;
     padding-right: 10px;
+
+    .mobileBadges{
+      margin: 5px 10px;
+        .mobileBadge{
+          padding: 5px;
+        }
+        .btn{
+          margin: 5px 0px;
+          white-space: normal;
+          width: 100%;
+          }
+      }
+
+
+  .reminder {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    justify-content: center;
+    align-content: stretch;
+    text-align: center;
+    margin: 20px 20px;
+
+    .fa-refresh{
+      position: relative;
+      top: 5px;
+      padding-right: 10px;
+      }
+
     }
 
+    hr.divider{
+      margin: 10px auto;
+    }
   }
 
-  hr.divider{
-    margin: 10px auto;
-  }
 }
