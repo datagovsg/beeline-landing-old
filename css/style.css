@@ -5918,7 +5918,7 @@ hr.divider {
   background-repeat: no-repeat;
   height: 820px;
   width: 690px;
-  top: 0px;
+  top: 40px;
   right: -230px;
   transform: scale(0.6);
   z-index: 0; }
@@ -5930,7 +5930,7 @@ hr.divider {
       display: block;
       height: 820px;
       width: 690px;
-      top: 10%;
+      top: 15%;
       right: -400px;
       transform: scale(1); } }
   @media (min-width: 768px) {
