@@ -5887,7 +5887,6 @@ button.close {
 @media print {
   .hidden-print {
     display: none !important; } }
-/* =============================== Clean Styles ===============================  */
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
@@ -5898,187 +5897,88 @@ body {
   letter-spacing: 1px;
   border-color: transparent; }
 
-.arrow {
-  display: none; }
-  @media (min-width: 480px) {
-    .arrow {
-      display: inline;
-      position: absolute;
-      top: 650px;
-      width: 100%;
-      text-align: center;
-      opacity: 0.7; }
-      .arrow .fa-angle-down {
-        color: #FFF;
-        transition: all 0.5s ease-out; }
-        .arrow .fa-angle-down:hover {
-          position: relative;
-          top: 2px;
-          opacity: 0.5; } }
-
-.hand {
-  position: absolute;
-  display: block;
-  max-height: 820px;
-  max-width: 690px;
-  width: 100vw;
-  height: auto;
-  right: -20%;
-  top: 15%; }
-  @media (min-width: 480px) {
-    .hand {
-      width: 100vw;
-      height: auto;
-      right: -400px;
-      top: 10%; } }
-  @media (min-width: 768px) {
-    .hand {
-      right: -300px;
-      top: 80px; } }
-  @media (min-width: 992px) {
-    .hand {
-      right: -200px;
-      top: 80px; } }
-  @media (min-width: 1200px) {
-    .hand {
-      right: -100px;
-      top: 80px; } }
-  @media (min-width: 1440px) {
-    .hand {
-      right: 0px;
-      top: 80px; } }
-
 h1.heading {
   margin-bottom: 60px; }
 
 hr.divider {
-  margin: 60px auto; }
+  margin-top: 60px auto; }
   @media (min-width: 768px) {
     hr.divider {
-      width: 750px;
-      margin-top: 20px auto; } }
+      width: 750px; } }
   @media (min-width: 992px) {
     hr.divider {
-      width: 970px;
-      margin-top: 30px auto; } }
+      width: 970px; } }
   @media (min-width: 1200px) {
     hr.divider {
-      width: 1170px;
-      margin-top: 60px auto; } }
+      width: 1170px; } }
 
-/* Space out the hr for the featurette more */
-hr.feature-divider {
-  margin: 60px 0; }
-
-/* =============================== Junk Styles ===============================  */
-/* Jumbotron Flex Section */
 .jumbotron {
   /* override Bootstrap defaults */
   padding-top: 0;
   padding-bottom: 0;
   margin-bottom: 50px;
+  overflow-x: hidden;
   /* Specific landing styles */
   height: 700px;
   color: #eeeeee;
   background: url("../images/background.png");
   background-size: cover;
   background-repeat: no-repeat;
-  line-height: 1.5;
-  overflow-x: hidden; }
-  @media (max-width: 480px) {
-    .jumbotron {
-      margin-bottom: 10px; } }
-  .jumbotron .jumbotronWrapper {
+  line-height: 1.5; }
+  .jumbotron .toMainContent {
+    position: absolute;
+    top: 650px;
+    width: 100%;
+    text-align: center;
+    opacity: 0.7; }
+    .jumbotron .toMainContent .fa-angle-down {
+      color: #FFF;
+      transition: all 0.5s ease-out; }
+      .jumbotron .toMainContent .fa-angle-down:hover {
+        position: relative;
+        top: 2px;
+        opacity: 0.5; }
+  .jumbotron .container {
     max-width: 100%;
     display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: flex-start;
-    align-content: stretch;
-    height: 700px; }
-    .jumbotron .jumbotronWrapper .row {
-      text-align: left;
+    flex-direction: row;
+    align-items: center;
+    height: 100%; }
+    .jumbotron .container .row {
       padding: 5px 0; }
-    @media (max-width: 480px) {
-      .jumbotron .jumbotronWrapper {
-        display: block; }
-        .jumbotron .jumbotronWrapper .intro {
-          position: absolute;
-          top: 65%;
-          text-align: center;
-          width: 100%; }
-          .jumbotron .jumbotronWrapper .intro h1 {
-            font-size: 36px;
-            padding: 20px; }
-        .jumbotron .jumbotronWrapper .tagline {
-          position: absolute;
-          top: 85%;
-          text-align: center;
-          width: 100%; }
-          .jumbotron .jumbotronWrapper .tagline p {
-            font-size: 17.6px;
-            padding: 20px; } }
+    .jumbotron .container .appBadgeBtn img {
+      height: 60px;
+      margin-bottom: 10px;
+      border-radius: 8px; }
+      .jumbotron .container .appBadgeBtn img:hover {
+        -moz-box-shadow: 0 0 5px #FFF;
+        -webkit-box-shadow: 0 0 5px #FFF;
+        box-shadow: 0 0 5px #FFF; }
+    .jumbotron .container .webApp {
+      margin-top: -10px;
+      margin-bottom: 20px;
+      vertical-align: middle; }
+      .jumbotron .container .webApp.btn-lg, .jumbotron .container .btn-group-lg > .webApp.btn {
+        padding: 10px 24px; }
+    .jumbotron .container .reminder p {
+      float: left;
+      color: #cabeda;
+      font-size: 16px;
+      width: 80%; }
+    .jumbotron .container .reminder .fa-2x {
+      color: #cabeda;
+      opacity: 0.8;
+      filter: alpha(opacity=80);
+      /* For IE8 and earlier */ }
+      .jumbotron .container .reminder .fa-2x .fa-refresh {
+        position: relative;
+        float: left;
+        top: 5px;
+        padding-right: 10px; }
 
-/* App Badges Section */
-.appBadges {
-  text-align: center; }
-  .appBadges .badgeCol-1 .appBadgeBtn img, .appBadges .badgeCol-2 .appBadgeBtn img {
-    height: 60px;
-    margin-bottom: 10px;
-    border-radius: 8px; }
-    .appBadges .badgeCol-1 .appBadgeBtn img:hover, .appBadges .badgeCol-2 .appBadgeBtn img:hover {
-      -moz-box-shadow: 0 0 5px #FFF;
-      -webkit-box-shadow: 0 0 5px #FFF;
-      box-shadow: 0 0 5px #FFF; }
-  .appBadges .badgeCol-2 {
-    position: relative;
-    left: 0px; }
-    @media (min-width: 768px) {
-      .appBadges .badgeCol-2 {
-        left: -20px; } }
-    @media (min-width: 992px) {
-      .appBadges .badgeCol-2 {
-        left: 100px; } }
-    @media (min-width: 1200px) {
-      .appBadges .badgeCol-2 {
-        left: 100px; } }
-    @media (min-width: 1440px) {
-      .appBadges .badgeCol-2 {
-        left: 100px; } }
-
-.webApp {
-  margin-top: -10px;
-  margin-bottom: 20px;
-  vertical-align: middle; }
-  .webApp.btn-lg, .btn-group-lg > .webApp.btn {
-    padding: 10px 24px; }
-
-@media (max-width: 480px) {
-  .reminder {
-    top: 30px;
-    margin: 0 auto;
-    width: 100%; } }
-.reminder p {
-  float: left;
-  color: #cabeda;
-  font-size: 16px;
-  width: 85%; }
-  @media (max-width: 480px) {
-    .reminder p {
-      color: #333333; } }
-.reminder .fa-2x {
-  color: #cabeda;
-  opacity: 0.8;
-  filter: alpha(opacity=80);
-  /* For IE8 and earlier */ }
-  @media (max-width: 480px) {
-    .reminder .fa-2x {
-      color: #333333; } }
-  .reminder .fa-2x .fa-refresh {
-    position: relative;
-    float: left;
-    top: 5px;
-    padding-right: 10px; }
+/* Space out the hr for the featurette more */
+.feature-divider {
+  margin: 60px 0; }
 
 /* Center align the text within the three columns below the carousel */
 .marketing {
@@ -6113,69 +6013,105 @@ hr.feature-divider {
     .footer a.links:hover {
       color: #a2a2a2;
       text-decoration: none; }
-  @media (max-width: 768px) {
-    .footer {
-      text-align: center; } }
 
-/* Lists Styling */
-.modal-body h2 {
-  font-size: 25px;
-  margin-top: 20px;
-  margin-bottom: 30px; }
-.modal-body p {
-  margin: 30px 0; }
-.modal-body ul {
-  list-style: disc inside; }
-.modal-body ol {
-  list-style: decimal inside; }
-.modal-body ol,
-.modal-body ul {
-  padding-left: 0; }
-  .modal-body ol li,
-  .modal-body ul li {
-    margin-bottom: 1em;
-    list-style-position: outside;
-    margin-left: 20px;
-    padding-left: 10px; }
-.modal-body ol ol,
-.modal-body ol ul,
-.modal-body ul ol,
-.modal-body ul ul {
-  margin: 1.5em 1em; }
-  .modal-body ol ol li,
-  .modal-body ol ul li,
-  .modal-body ul ol li,
-  .modal-body ul ul li {
-    margin-bottom: 1em;
-    list-style-position: outside;
-    margin-left: 20px;
-    padding-left: 10px; }
+/* Responsive CSS
+-------------------------------------------------- */
+/*==========  Mobile First Method  ==========*/
+/* Custom, iPhone Retina */
+@media only screen and (min-width: 320px) and (max-device-width: 480px) {
+  .toMainContent {
+    display: none; }
 
-.mobileShow {
-  display: none; }
-  @media (max-width: 480px) {
-    .mobileShow {
-      display: block; } }
-
-.mobileShow.container {
-  padding: 0 20px; }
-
-.mobileHide {
-  display: inline; }
-  @media (max-width: 480px) {
-    .mobileHide {
-      display: none; } }
-
-.mobileBadges {
-  padding: 0px;
-  position: relative;
-  top: 10px; }
-  .mobileBadges .mobileBadge1, .mobileBadges .mobileBadge2 {
-    padding: 0px; }
-  .mobileBadges .mobileBadge2 {
-    padding-left: 5px; }
-  .mobileBadges .btn {
-    white-space: normal;
-    width: 100%;
+  .jumbotron .hand {
+    right: 0;
+    top: 0;
+    left: 0;
+    display: inline;
+    position: absolute;
+    height: 50%;
+    width: 50%;
+    z-index: 100; }
+  .jumbotron .jumbotronContent {
     position: relative;
-    top: 10px; }
+    float: left; }
+
+  footer {
+    text-align: center; } }
+/* Extra Small Devices, Phones */
+@media only screen and (min-width: 480px) and (max-device-width: 768px) {
+  .toMainContent {
+    display: none; } }
+/* Small Devices, Tablets */
+@media only screen and (min-width: 768px) and (max-device-width: 992px) {
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: -160px; }
+
+  /* Bump up size of feature-heading */
+  .feature-heading {
+    font-size: 45px; }
+
+  .hand {
+    position: absolute;
+    background: url("../images/beelineAppHand.png");
+    background-repeat: no-repeat;
+    height: 820px;
+    width: 690px;
+    top: 100px;
+    right: -400px; }
+
+  .heatmap {
+    position: relative;
+    top: 0; } }
+/* Medium Devices, Desktops */
+@media only screen and (min-width: 992px) and (max-device-width: 1200px) {
+  .feature-heading {
+    margin-top: 120px; }
+
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: -30px; }
+
+  .hand {
+    position: absolute;
+    background: url("../images/beelineAppHand.png");
+    background-repeat: no-repeat;
+    height: 820px;
+    width: 690px;
+    top: 100px;
+    right: -200px; }
+
+  .heatmap {
+    position: relative;
+    top: 120px; } }
+/* Large Devices, Wide Screens */
+@media only screen and (min-width: 1200px) and (max-device-width: 1442px) {
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: -80px; }
+
+  .hand {
+    position: absolute;
+    background: url("../images/beelineAppHand.png");
+    background-repeat: no-repeat;
+    height: 820px;
+    width: 690px;
+    top: 100px;
+    right: -100px; } }
+/* Super Large Devices, Super Wide Screens */
+@media only screen and (min-width: 1442px) {
+  .badgeRow .badgeCol-2 {
+    position: relative;
+    left: -80px; }
+
+  .hand {
+    position: absolute;
+    background: url("../images/beelineAppHand.png");
+    background-repeat: no-repeat;
+    height: 820px;
+    width: 690px;
+    top: 100px;
+    right: 0; } }
+.suggest {
+  padding-top: 20px;
+  padding-bottom: 30px; }

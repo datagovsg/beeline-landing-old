@@ -42,8 +42,8 @@ body {
   max-width: 690px;
   width: 100vw;
   height:auto;
-  right: -15%;
-  top: 10%;
+  right: -20%;
+  top: 15%;
 
 
 
@@ -130,6 +130,30 @@ hr.feature-divider {
     .row {
       text-align: left;
       padding: 5px 0;
+    }
+
+    @media (max-width: $screen-phone) {
+      display: block;
+      .intro{
+        position: absolute;
+        top: 65%;
+        text-align: center;
+        width: 100%;
+        h1 {
+          font-size: $jumbotron-heading-font-size*0.8;
+          padding: 20px;
+        }
+      }
+      .tagline{
+        position: absolute;
+        top: 85%;
+        text-align: center;
+        width: 100%;
+        p {
+          font-size: $jumbotron-font-size*0.8;
+          padding: 20px;
+        }
+      }
     }
   }
 }
