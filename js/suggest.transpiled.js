@@ -19,6 +19,60 @@ Vue.directive('place-autocomplete', {
   }
 });
 
+Vue.directive('validate', {
+  params: ['validateRule', 'required', 'validateValue', 'vModel'],
+  bind: function bind() {
+    var _this2 = this;
+
+    this.vm.$set(this.expression, {
+      touched: false,
+      valid: false
+    });
+
+    //
+    var value = function value() {
+      if (_this2.params.validateValue) {
+        return _this2.vm.$get(_this2.params.validateValue);
+      } else if (_this2.params.vModel) {
+        return _this2.vm.$get(_this2.params.vModel);
+      } else {
+        return _this2.el.value;
+      }
+    };
+
+    this.el.addEventListener('focus', function () {
+      var val = _this2.vm.$get(_this2.expression);
+      Vue.set(val, 'touched', true);
+    });
+
+    var runCheck = function runCheck() {
+      var val = value();
+      var validate = _this2.vm.$get(_this2.expression);
+
+      if (_this2.params.required && !val) {
+        validate.valid = false;
+        return;
+      }
+      if (_this2.params.validateRule) {
+        var rule = _this2.vm.$get(_this2.params.validateRule);
+        if (rule && !rule(val)) {
+          validate.valid = false;
+          return;
+        }
+      }
+      validate.valid = true;
+    };
+
+    if (this.params.validateValue) {
+      this.vm.$watch(this.params.validateValue, runCheck);
+    } else if (this.params.vModel) {
+      this.vm.$watch(this.params.vModel, runCheck);
+    } else {
+      this.el.addEventListener('blur', runCheck);
+    }
+  }
+});
+
 VueGoogleMap.load({
   key: 'AIzaSyDC38zMc2TIj1-fvtLUdzNsgOQmTBb3N5M',
   libraries: 'places'
@@ -48,6 +102,7 @@ var vue = new Vue({
     arrivalTime: undefined,
     emailVerification: null,
     email: '',
+    noVerification: false,
     agreeTerms: false,
     focusAt: null,
     lock: new Auth0Lock('PwDT8IepW58tRCqZlLQkFKxKpuYrgNAp', 'beeline-suggestions.auth0.com', {
@@ -58,7 +113,8 @@ var vue = new Vue({
         }
       },
       autoclose: true
-    })
+    }),
+    validation: {}
   },
   computed: {
     formValid: function formValid() {
@@ -95,17 +151,17 @@ var vue = new Vue({
     });
   },
   ready: function ready() {
-    var _this2 = this;
+    var _this3 = this;
 
     this.lock.on('authenticated', function (authResult) {
-      _this2.lock.getProfile(authResult.idToken, function (error, profile) {
+      _this3.lock.getProfile(authResult.idToken, function (error, profile) {
         if (error) {
           alert("Your email could not be verified");
           return;
         }
 
-        _this2.email = profile.email;
-        _this2.emailVerification = {
+        _this3.email = profile.email;
+        _this3.emailVerification = {
           type: 'auth0',
           data: authResult.idToken
         };
@@ -115,7 +171,7 @@ var vue = new Vue({
 
   methods: {
     submit: function submit(event) {
-      var _this3 = this;
+      var _this4 = this;
 
       event.preventDefault();
 
@@ -123,7 +179,7 @@ var vue = new Vue({
       var splitTime = this.arrivalTime.split(':');
       var time = splitTime[0] * 3600000 + splitTime[1] * 60000;
 
-      this.$http.post('http://localhost:8080/suggestions/web', {
+      this.$http.post('https://api.beeline.sg/suggestions/web', {
         time: time,
         boardLat: this.suggestion.origin.lat(),
         boardLon: this.suggestion.origin.lng(),
@@ -136,8 +192,8 @@ var vue = new Vue({
           window.location.href = "/suggestSubmitted.html";
         });
 
-        _this3.time = null;
-        _this3.suggestion = {
+        _this4.time = null;
+        _this4.suggestion = {
           origin: null, destination: null, originPlace: null,
           destinationPlace: null
         };
@@ -146,7 +202,7 @@ var vue = new Vue({
       });
     },
     click: function click(event) {
-      var _this4 = this;
+      var _this5 = this;
 
       if (this.focusAt) {
         var focusAt = this.focusAt;
@@ -157,7 +213,7 @@ var vue = new Vue({
           geocoder.geocode({ location: event.latLng }, function (results, status) {
             if (status === google.maps.GeocoderStatus.OK) {
               if (results[0]) {
-                _this4.$set('suggestion.' + focusAt + 'Text', results[0].formatted_address);
+                _this5.$set('suggestion.' + focusAt + 'Text', results[0].formatted_address);
               }
             }
           });
@@ -191,7 +247,7 @@ var vue = new Vue({
       }
     },
     login: function login() {
-      var _this5 = this;
+      var _this6 = this;
 
       this.lock.show({
         responseType: 'token'
@@ -201,12 +257,19 @@ var vue = new Vue({
           return;
         }
 
-        _this5.email = profile.email;
-        _this5.emailVerification = {
+        _this6.email = profile.email;
+        _this6.emailVerification = {
           type: 'auth0',
           data: idToken
         };
       });
+    },
+    validLatLng: function validLatLng(latlng) {
+      return latlng && latlng.lat() >= 1 && latlng.lat() <= 2 && latlng.lng() >= 100 && latlng.lng() <= 105;
+    },
+    showEmail: function showEmail() {
+      this.emailVerification = null;
+      this.noVerification = true;
     }
   }
 });
