@@ -371,13 +371,12 @@ hr.feature-divider {
 
 }
 
-/* =============================== Suggest Page Styles ===============================  */
-
-.mapBackground{
-  background-color: #b2e2d6;
-  height: 700px;
-  z-index: -1;
+.btn-link {
+  text-decoration: underline;
 }
+
+
+/* =============================== Suggest Page Styles ===============================  */
 
 
 google-map {
@@ -392,24 +391,19 @@ google-map {
   width: 100%; height:100%;
 }
 
-.overmap {
-  position: absolute;
-  z-index: 99;
-  top: 8%;
-  right: 0;
-  width: 40%;
-  background: white;
-  height: auto;
-  padding: 50px;
-  margin: 50px;
+.alert {
+  /* display: none; */
+  margin-top: 10px;
 }
 
-
-
-.red {
-  background: #eba5a5;
+.circleFb {
+  color: #3b5998;
 }
 
-.readable {
-  width: 60ch;
+.circleGoogle{
+  color: #dd4b39;
+}
+
+.choice {
+ padding: 0px 10px ;
 }

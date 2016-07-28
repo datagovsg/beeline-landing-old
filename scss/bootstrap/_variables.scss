@@ -33,7 +33,7 @@ $body-bg:               #fff !default;
 $text-color:            $gray-dark !default;
 
 //** Global textual link color.
-$link-color:            $brand-primary !default;
+$link-color:            $brand-primary-variant !default;
 //** Link hover color set via `darken()` function.
 $link-hover-color:      darken($link-color, 15%) !default;
 //** Link hover decoration.
@@ -52,7 +52,7 @@ $font-family-base:        $font-family-sans-serif !default;
 
 $font-size-base:          18px;
 $font-size-large:         ceil(($font-size-base * 1.25)) !default; // ~18px
-$font-size-small:         ceil(($font-size-base * 0.85)) !default; // ~12px
+$font-size-small:         ceil(($font-size-base * 0.8)) !default; // ~12px
 
 $font-size-h1:            floor(($font-size-base * 2.6)) !default; // ~36px
 $font-size-h2:            floor(($font-size-base * 2.15)) !default; // ~30px
@@ -491,7 +491,7 @@ $pager-disabled-color:                 $pagination-disabled-color !default;
 //
 //##
 
-$jumbotron-padding:              30px !default;
+$jumbotron-padding:              0px !default;
 $jumbotron-color:                inherit !default;
 $jumbotron-bg:                   $gray-lighter !default;
 $jumbotron-heading-color:        inherit !default;
@@ -504,21 +504,21 @@ $jumbotron-line-height:          1.5;
 //
 //## Define colors for form feedback states and, by default, alerts.
 
-$state-success-text:             #3c763d !default;
-$state-success-bg:               #dff0d8 !default;
-$state-success-border:           darken(adjust-hue($state-success-bg, -10), 5%) !default;
+$state-success-text:             darken($brand-success, 10%);
+$state-success-bg:               lighten(desaturate($brand-success, 50%), 50%);
+$state-success-border:           darken($state-success-bg, 1%);
 
-$state-info-text:                #31708f !default;
-$state-info-bg:                  #d9edf7 !default;
-$state-info-border:              darken(adjust-hue($state-info-bg, -10), 7%) !default;
+$state-info-text:                desaturate($brand-primary, 20%);
+$state-info-bg:                  lighten(desaturate($brand-primary, 20%), 60%);
+$state-info-border:              darken($state-info-bg, 1%);
 
-$state-warning-text:             #8a6d3b !default;
-$state-warning-bg:               #fcf8e3 !default;
+$state-warning-text:             darken(adjust-hue($brand-warning, -20), 30%);
+$state-warning-bg:               lighten(adjust-hue($brand-warning, -20), 20%);
 $state-warning-border:           darken(adjust-hue($state-warning-bg, -10), 5%) !default;
 
-$state-danger-text:              #a94442 !default;
-$state-danger-bg:                #f2dede !default;
-$state-danger-border:            darken(adjust-hue($state-danger-bg, -10), 5%) !default;
+$state-danger-text:              darken($brand-danger, 40%);
+$state-danger-bg:                lighten($brand-danger, 25%);
+$state-danger-border:            darken($state-danger-bg, 1%);
 
 
 //== Tooltips
@@ -628,8 +628,8 @@ $modal-sm:                    30% !default;
 //
 //## Define alert colors, border radius, and padding.
 
-$alert-padding:               15px !default;
-$alert-border-radius:         $border-radius-base !default;
+$alert-padding:               5px!default;
+$alert-border-radius:         $border-radius-small !default;
 $alert-link-font-weight:      bold !default;
 
 $alert-success-bg:            $state-success-bg !default;
