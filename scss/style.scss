@@ -140,18 +140,21 @@ hr.feature-divider {
         text-align: center;
         width: 100%;
         h1 {
-          font-size: $jumbotron-heading-font-size*0.8;
+          font-size: 1.8em;
           padding: 20px;
         }
       }
       .tagline{
         position: absolute;
-        top: 85%;
         text-align: center;
         width: 100%;
+        top: 80%;
+
         p {
-          font-size: $jumbotron-font-size*0.8;
+          margin-top: 25px;
+          font-size: 1em;
           padding: 20px;
+          text-align: left;
         }
       }
     }
@@ -335,7 +338,7 @@ hr.feature-divider {
 }
 
 .mobileShow.container{
-  padding: 0 20px;
+  padding: 0 30px;
 }
 
 .mobileHide {
