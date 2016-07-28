@@ -197,7 +197,7 @@ var vue = new Vue({
       var splitTime = this.arrivalTime.split(':')
       var time = splitTime[0] * 3600000 + splitTime[1] * 60000;
 
-      this.$http.post('http://localhost:8080/suggestions/web', {
+      this.$http.post('https://api.beeline.sg/suggestions/web', {
         time: time,
         boardLat: this.suggestion.origin.lat(),
         boardLon: this.suggestion.origin.lng(),
@@ -288,6 +288,7 @@ var vue = new Vue({
           (latlng.lng() >= 100 && latlng.lng() <= 105)
     },
     showEmail() {
+      this.emailVerification = null;
       this.noVerification = true;
     }
   }
