@@ -36,18 +36,6 @@
   <!--Favicon-->
   <link rel="icon" type="image/png" href="images/favicon.png">
 
-  <style>
-
-  google-map {
-    width: 100%;
-    height: 300px;
-    display: block;
-  }
-  .vue-map-container {
-    width: 100%; height:100%;
-  }
-
-  </style>
 </head>
 
 <body id="top">
@@ -78,7 +66,7 @@
   <form class="container suggest" @submit="submit" v-cloak id="submit-form">
     <h1 class="heading">Suggest a new route</h1>
     <div class="row">
-      <div class="col-lg-7 col-md-6 col-sm-12">
+       <div class="col-lg-7 col-md-6 col-sm-12 col-xs-12">
 
         <google-map :center="center" :zoom="zoom" @g-click="click"
           v-ref:map :options="{
@@ -102,82 +90,80 @@
           address.
         </div>
       </div>
-      <div class="col-lg-5 col-md-6 col-sm-12">
-          <div class="form-group form-inline">
-            <label>
-              Start address
-              <input type="text"
-                placeholder="Street, Postal code, Building name, etc."
-                class="form-control"
-                v-place-autocomplete
-                v-model="suggestion.originText"
-                place="suggestion.originPlace"
-                @focus="focusIn('origin')">
-            </label>
-          </div>
-          <div class="form-group form-inline">
-            <label>
-              End address
-              <input type="text"
-                placeholder="Street, Postal code, Building name, etc."
-                class="form-control"
-                v-place-autocomplete
-                v-model="suggestion.destinationText"
-                place="suggestion.destinationPlace"
-                @focus="focusIn('destination')">
-            </label>
-          </div>
-          <div class="form-group form-inline">
-            <label>
-              Time at Destination
-              <select class="form-control" v-model="arrivalTime"
-                  @focus="zoomOut()">
-                <optgroup label="AM">
-                  <option value="06:00">6:00 AM</option>
-                  <option value="07:00">7:00 AM</option>
-                  <option value="08:00">8:00 AM</option>
-                  <option value="09:00">9:00 AM</option>
-                </optgroup>
-                <optgroup label="PM">
-                  <option value="5:00">5:00 PM</option>
-                  <option value="6:00">6:00 PM</option>
-                  <option value="7:00">7:00 PM</option>
-                  <option value="8:00">8:00 PM</option>
-                </optgroup>
-              </select>
-            </label>
-          </div>
-          <div class="form-group">
-            <label>
-              Email Address
-              <input type="email" class="form-control" v-model="email" placeholder="Email"
-                :disabled="emailVerification">
-            </label>
+      <div class="col-lg-5 col-md-6 col-sm-12 col-xs-12">
+        <div class="form-group">
+          <label class="control-label">
+            Start address </label>
+          <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')">
 
-            <div>
-              <button class="btn btn-default" @click="login" type="button">
-                Verify your email...
-              </button>
-              <!-- END: Authentication providers -->
+        </div>
+        <div class="form-group">
+          <label class="control-label">
+            End address</label>
+          <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')">
 
-              Verify your email now to skip verification later.
-            </div>
-          </div>
+        </div>
+        <div class="form-group">
+          <label class="control-label">
+            Time at Destination </label>
+          <select class="form-control" v-model="arrivalTime"  @focus="zoomOut()">
+            <option value="">Select the time you want to arrive at your destination</option>
+            <optgroup label="AM">
+              <option value="06:00">6:00 am</option>
+              <option value="06:30">6:30 am</option>
+              <option value="07:00">7:00 am</option>
+              <option value="07:30">7:30 am</option>
+              <option value="08:00">8:00 am</option>
+              <option value="08:30">8:30 am</option>
+              <option value="09:00">9:00 am</option>
+              <option value="09:30">9:30 am</option>
+            </optgroup>
+            <optgroup label="PM">
+              <option value="5:00">5:00 pm</option>
+              <option value="5:30">5:30 pm</option>
+              <option value="6:00">6:00 pm</option>
+              <option value="6:30">6:30 pm</option>
+              <option value="7:00">7:00 pm</option>
+              <option value="7:30">7:30 pm</option>
+              <option value="8:00">8:00 pm</option>
+              <option value="8:30">8:30 pm</option>
+            </optgroup>
+          </select>
+        </div>
+        <hr />
+        <div class="checkbox">
+          <label>
+            <input type="checkbox" v-model="agreeTerms"> Yes, I read and agree to Beeline's <a href="ida_privacy_policy.html" target="_blank">Privacy Policy</a> and <a href="ida_terms_of_use.html" target="_blank">Terms of use</a>.
+          </label>
+        </div>
 
-          <div class="checkbox">
-            <label>
-              <input type="checkbox" v-model="agreeTerms">
-              Yes, I read and agree to Beeline's <a>Privacy Policy</a> and <a>Terms of use</a>.
-            </label>
-          </div>
-          <div class="pull-left">
-            <button type="submit" class="btn btn-primary webApp"
-              :disabled="!formValid">
-              Submit Route Suggestion
+        <div class="form-group">
+          <label>
+            Email Address</label>
+            <input type="email" class="form-control" v-model="email" placeholder="Email"
+              :disabled="emailVerification">
+
+
+          <div>
+            <button class="btn btn-default" @click="login" type="button">
+              Verify your email...
             </button>
+            <!-- END: Authentication providers -->
+
+            Verify your email now to skip verification later.
           </div>
+        </div>
+
+
+        <div class="pull-left">
+          <button type="submit" class="btn btn-primary webApp" :disabled="!formValid">
+            Submit Route Suggestion
+          </button>
+        </div>
       </div>
-    </div>
+
+
+  </div>
 
     <div class="modal fade" tabindex="-1" role="dialog" id="submitted-dialog">
       <div class="modal-dialog" role="document">
@@ -225,174 +211,6 @@
       </div><!-- /.modal-dialog -->
     </div><!-- /.modal -->
   </form>
-
-
-    <!-- privacy modal -->
-    <div class="modal fade" id="privacy" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
-      <div class="modal-dialog" role="document">
-        <div class="modal-content">
-          <div class="modal-header">
-            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-            <h4 class="modal-title" id="myModalLabel">Privacy Policy</h4>
-              <p>Infocomm Development Authority</p>
-          </div>
-          <div class="modal-body">
-            <h2>Government Agency Privacy Statement</h2>
-            <ol>
-              <li>This is a Government Agency website.</li>
-              <li> We may use "cookies", where a small data file is sent to your device to store and track information about you when you enter our websites. The cookie is used to track information such as the number of users and their frequency of use, profiles
-                of users and their preferred sites. While this cookie can tell us when you enter our sites and which pages you visit, it cannot read data off your hard disk.</li>
-              <li>You can choose to accept or decline cookies. Most devices automatically accept cookies, but you can usually modify your device settings to decline cookies if you prefer. This may prevent you from taking full advantage of the website.</li>
-              <li>If you provide us with personally identifiable data
-                <ol>
-                  <li>We may share necessary data with other Government agencies, so as to serve you in the most efficient and effective way unless such sharing is prohibited by law.</li>
-                  <li>We will NOT share your personal data with non-Government entities, except where such entities have been authorised to carry out specific Government services.</li>
-                  <li>For your convenience, we may also display to you data you had previously supplied us or other Government Agencies. This will speed up the transaction and save you the trouble of repeating previous submissions. Should the data be out-of-date,
-                    please supply us the latest data.</li>
-                </ol>
-              </li>
-              <li>To safeguard your personal data, all electronic storage and transmission of personal data is secured with appropriate security technologies.</li>
-              <li>This site may contain links to non-Government sites whose data protection and privacy practices may differ from ours. We are not responsible for the content and privacy practices of these other websites and encourage you to consult the privacy
-                notices of those sites.</li>
-              <li>Please contact 1800 211 0777 (ida_qsm@ida.gov.sg) if you:
-                <ol>
-                  <li>have any enquires or feedback on our data protection policies and procedures,</li>
-                  <li>need more information on or access to data which you have provided to us in the past.</li>
-                </ol>
-              </li>
-            </ol>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- privacy modal ends-->
-
-    <!-- terms of use modal -->
-    <div class="modal fade" id="termsofuse" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
-      <div class="modal-dialog" role="document">
-        <div class="modal-content">
-          <div class="modal-header">
-            <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-            <h4 class="modal-title" id="myModalLabel">Terms of Use</h4>
-            <p>Infocomm Development Authority of Singapore</p>
-          </div>
-          <div class="modal-body">
-            <h2>General</h2>
-            <p>These Terms of Use govern your access to and use of our services, including this website, the application contained in this website, email notifications and Application Programme Interface (API) (collectively, the &ldquo;Beeline Service&CloseCurlyDoubleQuote;
-              or this &quot;Service&CloseCurlyDoubleQuote;). This Service is owned and operated by the Info-communications Development Authority of Singapore (&quot;IDA&quot;).</p>
-            <p>By accessing or using any part of this Service, you unconditionally agree and accept to be legally bound by these Terms of Use. If you do not agree to these Terms of Use, please do not use this Service or any part of this Service.</p>
-            <p>In case of any violation of these Terms of Use, IDA reserves the right to seek all remedies available under the law and in equity for such violations. These Terms of Use apply to access and use of this Service or any part of this Service, both
-              now and in the future.</p>
-            <p>IDA reserves the right to change these Terms of Use from time to time at its sole discretion. All changes will be posted on this page, and your use of this Service or any part of this Service after such changes have been posted will constitute
-              your agreement to the modified Terms of Use and all of the changes. You should therefore read this page carefully each time you access or use any part of this Service.</p>
-
-            <h2>Nature of this Service</h2>
-            <p>This Service facilitates crowd-sourcing road transport routes and the booking of transport services along those routes. IDA <b>DOES NOT</b> provide, own or operate any transport services. When making a booking through this Service, you are entering
-              into a contract with your selected transport service provider. IDA is <b>NOT</b> responsible for the fulfilment and quality of transport services available through this Service.</p>
-            <p>Transport services, including provision of transport, booking amendments, cancellation and payment disputes, will be provided by your selected transport service provider in accordance with the Booking Policy of your selected transport service
-              provider. The Booking Policy of your selected transport service provider is presented at the point of booking and in the email notification confirming your booking.</p>
-
-            <h2>Proprietary Rights</h2>
-            <p>The materials available on or through the Service, including any software, text and images (the &ldquo;Contents&quot;), are protected by copyright, trademark and other forms of proprietary rights. All rights, title and interest in the Contents
-              are owned by, licensed to, or controlled by IDA.</p>
-
-            <h2>Content</h2>
-            <p>Unless otherwise provided, the Contents shall not be reproduced, republished, uploaded, posted, transmitted or otherwise distributed in any way, without the prior written permission of IDA.</p>
-            <p>You may use, hyperlink, copy and distribute the Contents found on this website solely for personal, internal, non-commercial, informational purposes only. You may download one copy of any information provided in this website onto a single computer
-              for your own personal non-commercial use provided that you keep intact all accompanying copyright and other proprietary notices. You may not display, distribute or otherwise use any of the Content found on this website for any commercial purpose
-              unless you receive specific prior written consent from IDA.</p>
-            <p>Modification of any of the Contents or use of the Contents for any other purpose will be a violation of IDA's copyright and other intellectual property rights. Graphics and images on this website are protected by copyright and may not be reproduced
-              or appropriated in any manner without the prior written permission of their respective copyright owners.</p>
-            <p>The design and layout of the Contents are protected by intellectual property and other laws and may not be copied or imitated in whole or in part. No logo, graphic, sound, image or search engine from this website may be copied or transmitted
-              unless with the prior express permission of IDA.</p>
-
-            <h2>Disclaimer of Warranties and Liability</h2>
-            <p>12. This Service is provided on an &quot;as is&quot; and &ldquo;as available&CloseCurlyDoubleQuote; basis without warranties of any kind. To the fullest extent permitted by law, IDA does not make any representations or warranties of any kind
-              whatsoever in relation to the Service and hereby disclaims all express, implied and/or statutory warranties of any kind to you or any third party, whether arising from usage or custom or trade or by operation of law or otherwise, including
-              but not limited to any representations or warranties: </p>
-            <ul>
-              <li>as to the accuracy, completeness, correctness, currency, timeliness, reliability, availability, security, non-infringement, title, merchantability, quality or fitness for any particular purpose of the Service; and</li>
-              <li>that the Contents available through this website or any functions associated therewith will be uninterrupted or error-free, or that defects will be corrected or that this website and the server is and will be free of all viruses and/or other
-                malicious, destructive or corrupting code, programme or macro.</li>
-            </ul>
-
-            <p>IDA shall also not be liable to you or any third party for any damage or loss of any kind whatsoever and howsoever caused, including but not limited to any direct or indirect, special or consequential damages, loss of income, revenue or profits,
-              lost or damaged data, or damage to your computer, software or any other property, whether arising directly or indirectly from &ndash;</p>
-            <ul>
-              <li>your access to or use of this Service or any part of this Service;</li>
-              <li>any loss of access to our use of this Service or any part of this Service, howsoever caused; </li>
-              <li>any inaccuracy or incompleteness in, or errors or omissions in the transmission of, the Contents; </li>
-              <li>any delay or interruption in the transmission of the Contents, whether caused by delay or interruption in transmission over the internet or otherwise; or</li>
-              <li>any decision made or action taken by you or any third party in reliance upon the Service,</li>
-            </ul>
-            regardless of whether IDA has been advised of the possibility of such damage or loss.
-
-            <p>For the avoidance of doubt, IDA <b>DOES NOT</b> provide, own or operate any transport services, and makes no representation or warranty of any kind whatsoever in relation to any transport services provided by the transport service provider you
-              select through this Service (including but not limited to any representations or warranties as to the timeliness, reliability, availability, quality or fitness for any particular purpose of the transport services provided by the transport
-              service provider you select through this Service). </p>
-            <p>For the avoidance of doubt, IDA hereby disclaims all liability to you or any third party for any damage or loss of any kind whatsoever and howsoever caused, including but not limited to any direct, indirect, special or consequential damages,
-              loss of income, revenue or profits, lost or damaged data, or damage to any property, whether arising directly or indirectly from your use of the transport services provided by the transport service provider you select through this Service.
-              </p>
-
-            <h2>No Representations</h2>
-            <p>Without prejudice to the generality of the disclaimers stated above, you agree that the Contents as provided by this Service, including but not limited to any information relating to &ndash;
-              <ul>
-                <li>IDA&CloseCurlyQuote;s statutory duties, functions and powers; and </li>
-                <li>IDA&CloseCurlyQuote;s regulatory policies, frameworks, projects, initiatives, plans, schemes, objectives and instruments, </li>
-              </ul>
-            </p>
-            <p>shall not be construed as constituting any promise or representation by IDA to you or any third party that IDA will or will not adopt any particular course of action or confer any particular benefit upon you or any third party. The Contents
-              shall not preclude, limit or constrain IDA&CloseCurlyQuote;s exercise of its rights, powers and discretion in any way nor compel, require or oblige IDA to exercise its rights, powers and discretion in any particular manner or to achieve any
-              particular outcome.</p>
-
-            <p>You further agree that you shall not rely on any of the Contents to claim or assert any form of legitimate expectation against IDA, whether procedural or substantive in nature, in respect of any action that IDA may or may not take in the exercise
-              of its discretion as a public authority. </p>
-            <p>IDA reserves the right to change, modify, add to, derogate from or vary its position in respect of any regulatory policies, frameworks, projects, initiatives, plans, schemes, objectives and instruments referred to on this website at any time
-              in IDA&CloseCurlyQuote;s sole and absolute discretion without prior notice to you. </p>
-            <p>You shall obtain your own professional and/or legal advice and conduct all necessary due diligence, including but not limited to making such other investigations or seeking clarifications as may be appropriate, as regards any decision or action
-              that you intend to take in relation to any matter concerning the Contents.</p>
-
-            <h2>Right of Access</h2>
-            <p>IDA reserves the right to update or modify this Service from time to time. IDA further reserves all rights to deny or restrict access to this Service to any particular person, or to block access from a particular Internet address to this Service,
-              at any time, without ascribing any reasons whatsoever.</p>
-            You agree that you will not:
-            <ul>
-              <li>use any device, software or routine to interfere or attempt to interfere with the proper working of this Service; and</li>
-              <li>take any action that imposes an unreasonable or disproportionately large load on IDA's servers</li>
-            </ul>
-
-
-            <h2>Hyperlinks to Third Party Sites</h2>
-            <p>The Contents contain hyperlinks to websites which are not maintained nor controlled by IDA. IDA shall not be responsible for the content of any hyperlinked website or any hyperlink contained in a hyperlinked web site, and shall not be liable
-              for any damages or loss arising from access to those websites. Use of the hyperlinks and access to such hyperlinked websites are entirely at your own risk.</p>
-            <p>All hyperlinks to other websites are provided as a convenience to you as a user of this Service. The inclusion of any hyperlink does not imply endorsement by IDA of such websites. In no circumstances shall IDA be considered to be associated
-              or affiliated in whatever manner with any trade or service marks, logos, insignia or other devices used or appearing on websites to which the Contents are hyperlinked.</p>
-
-            <h2>Hyperlinks to the Contents from Third Party Websites</h2>
-            <p>Except as set forth below, caching and hyperlinks to, and the framing of any of the Contents are prohibited.</p>
-            <p>You may hyperlink to the Home Page of websites provided by the Service, upon prior notification to IDA in writing. You must make a specific request for, and secure permission from IDA prior to hyperlinking to, or framing, any of the Contents,
-              or engaging in similar activities. IDA reserves the right to impose conditions when permitting any hyperlinking to, or framing of or any of the Contents.</p>
-            <p>Your hyperlinking to, or your framing of any of the Contents constitute acceptance of these Terms of Use. This is deemed to be the case even after the posting of any changes or modifications to these Terms of Use. If you do not accept these
-              Terms of Use, you must discontinue linking to, or framing of any of the Contents.</p>
-            <p>In no circumstances shall IDA be considered to be associated or affiliated in any manner with any trade or service marks, logos, insignia or other devices used or appearing on websites that link to any of the Contents.</p>
-            <p>IDA reserves all rights to disable any links to, or frames of any site containing inappropriate, profane, defamatory, infringing, obscene, indecent or unlawful topics, names, material or information, or material or information that violates
-              any written law, any applicable intellectual property, proprietary, privacy or publicity rights.</p>
-            <p>IDA reserves the right to disable any unauthorised links or frames and disclaims any responsibility for the content available on any other site reached by links to or from any of the Contents.</p>
-
-            <h2>Governing Law</h2>
-            <p>These Terms of Use shall be governed and construed in accordance with laws of Singapore.</p>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- terms of use ends-->
-
   <!-- /.row -->
   <hr class="divider">
   <!-- FOOTER -->
@@ -403,8 +221,8 @@
       <p class="pull-left">&copy; 2016 Beeline Singapore. &nbsp; All rights reserved.</p>
       <p class="pull-right">
         <a class="links" href="#top">Back to top</a>&middot;
-        <a class="links" href="privacy.html">Privacy Policy</a>&middot;
-        <a class="links" href="termsofuse.html">Terms of Use</a>
+        <a class="links" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a>&middot;
+        <a class="links" href="ida_terms_of_use.html" target="_blank">Terms of Use</a>
       </p>
     </div>
   </footer>

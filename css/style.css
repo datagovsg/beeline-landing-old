@@ -5887,7 +5887,7 @@ button.close {
 @media print {
   .hidden-print {
     display: none !important; } }
-/* =============================== Clean Styles ===============================  */
+/* =============================== Landing Home Styles ===============================  */
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
@@ -5970,7 +5970,6 @@ hr.divider {
 hr.feature-divider {
   margin: 60px 0; }
 
-/* =============================== Junk Styles ===============================  */
 /* Jumbotron Flex Section */
 .jumbotron {
   /* override Bootstrap defaults */
@@ -6183,3 +6182,37 @@ hr.feature-divider {
     width: 100%;
     position: relative;
     top: 10px; }
+
+/* =============================== Suggest Page Styles ===============================  */
+.mapBackground {
+  background-color: #b2e2d6;
+  height: 700px;
+  z-index: -1; }
+
+google-map {
+  width: 100%;
+  height: 700px;
+  display: block;
+  z-index: 10;
+  position: relative; }
+
+.vue-map-container {
+  width: 100%;
+  height: 100%; }
+
+.overmap {
+  position: absolute;
+  z-index: 99;
+  top: 8%;
+  right: 0;
+  width: 40%;
+  background: white;
+  height: auto;
+  padding: 50px;
+  margin: 50px; }
+
+.red {
+  background: #eba5a5; }
+
+.readable {
+  width: 60ch; }
