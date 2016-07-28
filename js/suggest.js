@@ -126,6 +126,9 @@ var vue = new Vue({
         autoclose: true,
       }),
     validation: {},
+    isEmail(str) {
+      return /.+@.+\..+/i.test(str);
+    }
   },
   computed: {
     formValid() {

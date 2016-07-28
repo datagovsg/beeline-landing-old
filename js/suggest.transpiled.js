@@ -114,7 +114,11 @@ var vue = new Vue({
       },
       autoclose: true
     }),
-    validation: {}
+    validation: {},
+    isEmail: function isEmail(str) {
+      return (/.+@.+\..+/i.test(str)
+      );
+    }
   },
   computed: {
     formValid: function formValid() {
