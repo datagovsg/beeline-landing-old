@@ -15,6 +15,62 @@ Vue.directive('place-autocomplete', {
   }
 })
 
+Vue.directive('validate', {
+  params: ['validateRule', 'required', 'validateValue', 'vModel'],
+  bind() {
+    this.vm.$set(this.expression, {
+      touched: false,
+      valid: false,
+    })
+
+    //
+    var value = () => {
+      if (this.params.validateValue) {
+        return this.vm.$get(this.params.validateValue);
+      }
+      else if (this.params.vModel) {
+        return this.vm.$get(this.params.vModel);
+      }
+      else {
+        return this.el.value;
+      }
+    }
+
+    this.el.addEventListener('focus', () => {
+      var val = this.vm.$get(this.expression);
+      Vue.set(val, 'touched', true);
+    });
+
+    var runCheck = () => {
+      var val = value();
+      var validate = this.vm.$get(this.expression);
+
+      if (this.params.required && !val) {
+        validate.valid = false;
+        return;
+      }
+      if (this.params.validateRule) {
+        var rule = this.vm.$get(this.params.validateRule);
+        if (rule && !rule(val)) {
+          validate.valid = false;
+          return;
+        }
+      }
+      validate.valid = true;
+    };
+
+    if (this.params.validateValue) {
+      this.vm.$watch(this.params.validateValue, runCheck);
+    }
+    else if (this.params.vModel) {
+      this.vm.$watch(this.params.vModel, runCheck);
+    }
+    else {
+      this.el.addEventListener('blur', runCheck);
+    }
+  }
+})
+
 VueGoogleMap.load({
   key: 'AIzaSyDC38zMc2TIj1-fvtLUdzNsgOQmTBb3N5M',
   libraries: 'places',
@@ -55,6 +111,7 @@ var vue = new Vue({
     arrivalTime: undefined,
     emailVerification: null,
     email: '',
+    noVerification: false,
     agreeTerms: false,
     focusAt: null,
     lock: new Auth0Lock(
@@ -68,6 +125,7 @@ var vue = new Vue({
         },
         autoclose: true,
       }),
+    validation: {},
   },
   computed: {
     formValid() {
@@ -223,6 +281,14 @@ var vue = new Vue({
           data: idToken,
         }
       })
+    },
+    validLatLng(latlng) {
+      return latlng &&
+          (latlng.lat() >= 1 && latlng.lat() <= 2) &&
+          (latlng.lng() >= 100 && latlng.lng() <= 105)
+    },
+    showEmail() {
+      this.noVerification = true;
     }
   }
 })

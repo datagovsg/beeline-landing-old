@@ -91,9 +91,12 @@
         <div class="col-lg-5 col-md-6 col-sm-12 col-xs-12">
           <div class="form-group">
             <label class="control-label">
-              Start address </label>
-            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')">
-            <div class="alert alert-info">
+              Start address
+            </label>
+            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')"
+                v-validate="validation.originValid" validate-rule="validLatLng"
+                validate-value="suggestion.origin">
+            <div class="alert alert-info" v-show="validation.originValid.touched && !validation.originValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid address.</span>
             </div>
           </div>
@@ -101,16 +104,19 @@
           <div class="form-group">
             <label class="control-label">
               End address</label>
-            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')">
-            <div class="alert alert-info">
+            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')"
+                v-validate="validation.destinationValid" validate-rule="validLatLng"
+                validate-value="suggestion.destination">
+            <div class="alert alert-info" v-show="validation.destinationValid.touched && !validation.destinationValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid address.</span></div>
           </div>
 
-
           <div class="form-group">
             <label class="control-label">
-              Time at Destination </label>
-            <select class="form-control" v-model="arrivalTime" @focus="zoomOut()">
+              Time at Destination
+            </label>
+            <select class="form-control" v-model="arrivalTime" @focus="zoomOut()"
+              v-validate="validation.time" required="true">
               <option selected="selected">Select the time you want to arrive at your destionation</option>
               <optgroup label="AM">
                 <option value="06:00">6:00 am</option>
@@ -133,20 +139,24 @@
                 <option value="8:30">8:30 pm</option>
               </optgroup>
             </select>
-            <div class="alert alert-info">
-              <i class="fa fa-info-circle"></i> <span class="small">
-            Please select the time you want to arrive at your destination.
-          </span>
+            <div class="alert alert-info"
+                v-show="validation.time && validation.time.touched && !validation.time.valid">
+              <i class="fa fa-info-circle"></i>
+              <span class="small">
+                Please select the time you want to arrive at your destination.
+              </span>
             </div>
           </div>
 
           <div class="form-group">
             <div class="checkbox">
               <label>
-                <input type="checkbox" v-model="agreeTerms"> Yes, I read and agree to Beeline's <a class="btn-link" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a> and <a class="btn-link" href="ida_terms_of_use.html" target="_blank">Terms of use</a>.
+                <input type="checkbox" v-model="agreeTerms" v-validate="validation.agreeTerms"
+                    required>
+                    Yes, I read and agree to Beeline's <a class="btn-link" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a> and <a class="btn-link" href="ida_terms_of_use.html" target="_blank">Terms of use</a>.
               </label>
             </div>
-            <div class="alert alert-info">
+            <div class="alert alert-info" v-show="validation.agreeTerms && !validation.agreeTerms.valid">
               <i class="fa fa-info-circle"></i> <span class="small"> Please read and agree to the terms if you want to submit a route suggestions.</span>
             </div>
           </div>
@@ -164,25 +174,29 @@
 </span>
             </button>
             <span class="choice"> or </span>
-            <button class="btn btn-default" @click="login" type="button">
+            <button class="btn btn-default" @click="showEmail" type="button">
               Enter my email
             </button>
           </div>
 
-
-          <div class="form-group">
+          <div class="form-group" v-show="noVerification || emailVerification">
             <label>
-              Email Address</label>
-            <input type="email" class="form-control" v-model="email" placeholder="Your Email Address" :disabled="emailVerification">
-            <div class="alert alert-info">
-              <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid email address.</span>
+              Email Address
+            </label>
+            <input type="email" class="form-control" v-model="email"
+              placeholder="Your Email Address" :disabled="emailVerification"
+              v-validate="validation.email" validate-rule="isEmail"
+              required>
+            <div class="alert alert-info" v-show="validation.email && validation.email.touched && !validation.email.valid">
+              <i class="fa fa-info-circle"></i>
+              <span class="small">Please enter a valid email address.</span>
             </div>
           </div>
-            <div class="text-center">
-              <button type="submit" class="btn btn-primary btn-lg" :disabled="!formValid">
-                Submit Route Suggestion
-              </button>
-            </div>
+          <div class="text-center">
+            <button type="submit" class="btn btn-primary btn-lg" :disabled="!formValid">
+              Submit Route Suggestion
+            </button>
+          </div>
 
           <!-- END: Authentication providers -->
 
@@ -214,7 +228,7 @@
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-default" data-dismiss="modal">
-                Back to Home
+                Continue
               </button>
             </div>
           </div>
@@ -236,7 +250,7 @@
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-default" data-dismiss="modal">
-                Back to Home
+                Back
               </button>
             </div>
           </div>
