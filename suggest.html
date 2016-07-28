@@ -25,6 +25,19 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/animate.css">
 
+  <style>
+    .expand-transition {
+      transition: ease 0.1s all;
+      max-height: 999px;
+    }
+    .expand-enter, .expand-leave {
+      max-height: 0px;
+      padding-top: 0;
+      padding-bottom: 0;
+      overflow: hidden;
+    }
+  </style>
+
   <!--JS-->
   <script src="//cdn.auth0.com/js/lock/10.0/lock.min.js"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
@@ -96,7 +109,7 @@
             <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')"
                 v-validate="validation.originValid" validate-rule="validLatLng"
                 validate-value="suggestion.origin">
-            <div class="alert alert-info" v-show="validation.originValid.touched && !validation.originValid.valid">
+            <div class="alert alert-info" transition="expand" v-show="validation.originValid && validation.originValid.touched && !validation.originValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid address.</span>
             </div>
           </div>
@@ -107,7 +120,7 @@
             <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')"
                 v-validate="validation.destinationValid" validate-rule="validLatLng"
                 validate-value="suggestion.destination">
-            <div class="alert alert-info" v-show="validation.destinationValid.touched && !validation.destinationValid.valid">
+            <div class="alert alert-info" transition="expand" v-show="validation.destinationValid && validation.destinationValid.touched && !validation.destinationValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid address.</span></div>
           </div>
 
@@ -139,7 +152,7 @@
                 <option value="8:30">8:30 pm</option>
               </optgroup>
             </select>
-            <div class="alert alert-info"
+            <div class="alert alert-info" transition="expand"
                 v-show="validation.time && validation.time.touched && !validation.time.valid">
               <i class="fa fa-info-circle"></i>
               <span class="small">
@@ -156,7 +169,7 @@
                     Yes, I read and agree to Beeline's <a class="btn-link" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a> and <a class="btn-link" href="ida_terms_of_use.html" target="_blank">Terms of use</a>.
               </label>
             </div>
-            <div class="alert alert-info" v-show="validation.agreeTerms && !validation.agreeTerms.valid">
+            <div class="alert alert-info" transition="expand" v-show="validation.agreeTerms && !validation.agreeTerms.valid">
               <i class="fa fa-info-circle"></i> <span class="small"> Please read and agree to the terms if you want to submit a route suggestions.</span>
             </div>
           </div>
@@ -179,7 +192,8 @@
             </button>
           </div>
 
-          <div class="form-group" v-show="noVerification || emailVerification">
+          <div class="form-group" v-show="noVerification || emailVerification"
+          transition="expand">
             <label>
               Email Address
             </label>
@@ -187,7 +201,7 @@
               placeholder="Your Email Address" :disabled="emailVerification"
               v-validate="validation.email" validate-rule="isEmail"
               required>
-            <div class="alert alert-info" v-show="validation.email && validation.email.touched && !validation.email.valid">
+            <div class="alert alert-info" transition="expand" v-show="validation.email && validation.email.touched && !validation.email.valid">
               <i class="fa fa-info-circle"></i>
               <span class="small">Please enter a valid email address.</span>
             </div>
