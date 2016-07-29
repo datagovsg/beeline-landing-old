@@ -233,7 +233,7 @@ var vue = new Vue({
         emailVerification: this.emailVerification
       }).then(function (success) {
         $('#submitted-dialog').modal('show').on('hidden.bs.modal', function () {
-          window.location.href = "/suggestSubmitted.html";
+          window.location.href = "suggestSubmitted.html";
         });
 
         _this6.time = null;
