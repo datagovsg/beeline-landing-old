@@ -83,9 +83,6 @@
 
         <!-- map start -->
         <div class="col-lg-7 col-md-6 col-sm-12 col-xs-12">
-          <div v-visible="focusAt">
-            Click anywhere on the map to set the {{focusAt === 'origin' ? 'start' : 'end'}} address.
-          </div>
           <google-map :center="center" :zoom="zoom" @g-click="click" v-ref:map :options="{
             clickableIcons: false,
             disableDefaultUi: true,
@@ -106,9 +103,11 @@
             <label class="control-label">
               Start address
             </label>
-            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')"
+            <input type="text" placeholder="Street, Postal code, Building name, etc."
+                class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')"
                 v-validate="validation.originValid" validate-rule="validLatLng"
-                validate-value="suggestion.origin">
+                validate-value="suggestion.origin"
+                v-focus-placeholder="Click on the map, or type the name of the place.">
             <div class="alert alert-info" transition="expand" v-show="validation.originValid && validation.originValid.touched && !validation.originValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span>
             </div>
@@ -119,7 +118,8 @@
               End address</label>
             <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')"
                 v-validate="validation.destinationValid" validate-rule="validLatLng"
-                validate-value="suggestion.destination">
+                validate-value="suggestion.destination"
+                v-focus-placeholder="Click on the map, or type the name of the place.">
             <div class="alert alert-info" transition="expand" v-show="validation.destinationValid && validation.destinationValid.touched && !validation.destinationValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span></div>
           </div>
