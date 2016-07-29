@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "http-server -p 8090 .",
-    "build": "babel -o js/suggest.transpiled.js js/suggest.js && node-sass -o css scss"
+    "build": "babel -o js/suggest.transpiled.js js/suggest.js && node-sass -o css scss",
+    "watch": "babel --watch -o js/suggest.transpiled.js js/suggest.js & node-sass --watch -o css scss"
   },
   "repository": {
     "type": "git",
