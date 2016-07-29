@@ -19,10 +19,50 @@ Vue.directive('place-autocomplete', {
   }
 });
 
+/**
+  v-visible: to toggle the visibility depending on the expression
+**/
+Vue.directive('visible', {
+  bind: function bind() {
+    var _this2 = this;
+
+    var update = function update(expr) {
+      if (expr) {
+        console.log('set to normal?');
+        _this2.el.style.visibility = 'visible';
+      } else {
+        _this2.el.style.visibility = 'hidden';
+      }
+      console.log(_this2.el.style, expr, _this2.expression, _this2.el.style.visibility);
+    };
+
+    this.vm.$watch(this.expression, update);
+    update(this.vm.$eval(this.expression));
+  }
+});
+
+/**
+  v-focus-placeholder: Set a different placeholder when the input is in focus
+**/
+Vue.directive('focus-placeholder', {
+  bind: function bind() {
+    var _this3 = this;
+
+    var originalPlaceholder = this.el.placeholder;
+
+    this.el.addEventListener('focus', function () {
+      _this3.el.placeholder = _this3.expression;
+    });
+    this.el.addEventListener('blur', function () {
+      _this3.el.placeholder = originalPlaceholder;
+    });
+  }
+});
+
 Vue.directive('validate', {
   params: ['validateRule', 'required', 'validateValue', 'vModel'],
   bind: function bind() {
-    var _this2 = this;
+    var _this4 = this;
 
     this.vm.$set(this.expression, {
       touched: false,
@@ -31,30 +71,30 @@ Vue.directive('validate', {
 
     //
     var value = function value() {
-      if (_this2.params.validateValue) {
-        return _this2.vm.$get(_this2.params.validateValue);
-      } else if (_this2.params.vModel) {
-        return _this2.vm.$get(_this2.params.vModel);
+      if (_this4.params.validateValue) {
+        return _this4.vm.$get(_this4.params.validateValue);
+      } else if (_this4.params.vModel) {
+        return _this4.vm.$get(_this4.params.vModel);
       } else {
-        return _this2.el.value;
+        return _this4.el.value;
       }
     };
 
     this.el.addEventListener('focus', function () {
-      var val = _this2.vm.$get(_this2.expression);
+      var val = _this4.vm.$get(_this4.expression);
       Vue.set(val, 'touched', true);
     });
 
     var runCheck = function runCheck() {
       var val = value();
-      var validate = _this2.vm.$get(_this2.expression);
+      var validate = _this4.vm.$get(_this4.expression);
 
-      if (_this2.params.required && !val) {
+      if (_this4.params.required && !val) {
         validate.valid = false;
         return;
       }
-      if (_this2.params.validateRule) {
-        var rule = _this2.vm.$get(_this2.params.validateRule);
+      if (_this4.params.validateRule) {
+        var rule = _this4.vm.$get(_this4.params.validateRule);
         if (rule && !rule(val)) {
           validate.valid = false;
           return;
@@ -155,17 +195,17 @@ var vue = new Vue({
     });
   },
   ready: function ready() {
-    var _this3 = this;
+    var _this5 = this;
 
     this.lock.on('authenticated', function (authResult) {
-      _this3.lock.getProfile(authResult.idToken, function (error, profile) {
+      _this5.lock.getProfile(authResult.idToken, function (error, profile) {
         if (error) {
           alert("Your email could not be verified");
           return;
         }
 
-        _this3.email = profile.email;
-        _this3.emailVerification = {
+        _this5.email = profile.email;
+        _this5.emailVerification = {
           type: 'auth0',
           data: authResult.idToken
         };
@@ -175,7 +215,7 @@ var vue = new Vue({
 
   methods: {
     submit: function submit(event) {
-      var _this4 = this;
+      var _this6 = this;
 
       event.preventDefault();
 
@@ -196,8 +236,8 @@ var vue = new Vue({
           window.location.href = "/suggestSubmitted.html";
         });
 
-        _this4.time = null;
-        _this4.suggestion = {
+        _this6.time = null;
+        _this6.suggestion = {
           origin: null, destination: null, originPlace: null,
           destinationPlace: null
         };
@@ -206,7 +246,7 @@ var vue = new Vue({
       });
     },
     click: function click(event) {
-      var _this5 = this;
+      var _this7 = this;
 
       if (this.focusAt) {
         var focusAt = this.focusAt;
@@ -217,7 +257,7 @@ var vue = new Vue({
           geocoder.geocode({ location: event.latLng }, function (results, status) {
             if (status === google.maps.GeocoderStatus.OK) {
               if (results[0]) {
-                _this5.$set('suggestion.' + focusAt + 'Text', results[0].formatted_address);
+                _this7.$set('suggestion.' + focusAt + 'Text', results[0].formatted_address);
               }
             }
           });
@@ -251,7 +291,7 @@ var vue = new Vue({
       }
     },
     login: function login() {
-      var _this6 = this;
+      var _this8 = this;
 
       this.lock.show({
         responseType: 'token'
@@ -261,8 +301,8 @@ var vue = new Vue({
           return;
         }
 
-        _this6.email = profile.email;
-        _this6.emailVerification = {
+        _this8.email = profile.email;
+        _this8.emailVerification = {
           type: 'auth0',
           data: idToken
         };
