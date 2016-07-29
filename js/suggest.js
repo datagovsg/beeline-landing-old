@@ -15,6 +15,9 @@ Vue.directive('place-autocomplete', {
   }
 })
 
+/**
+  v-visible: to toggle the visibility depending on the expression
+**/
 Vue.directive('visible', {
   bind() {
     var update = (expr) => {
@@ -30,6 +33,22 @@ Vue.directive('visible', {
 
     this.vm.$watch(this.expression, update)
     update(this.vm.$eval(this.expression))
+  }
+});
+
+/**
+  v-focus-placeholder: Set a different placeholder when the input is in focus
+**/
+Vue.directive('focus-placeholder', {
+  bind() {
+    var originalPlaceholder = this.el.placeholder;
+
+    this.el.addEventListener('focus', () => {
+      this.el.placeholder = this.expression;
+    })
+    this.el.addEventListener('blur', () => {
+      this.el.placeholder = originalPlaceholder;
+    })
   }
 });
 
