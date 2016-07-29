@@ -17,3 +17,5 @@ $ http-server beeline-landing/
 </code></pre>
 
 Use the address given to view
+
+npm run start
