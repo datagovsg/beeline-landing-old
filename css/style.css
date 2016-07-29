@@ -6239,8 +6239,8 @@ google-map {
   padding: 10px 30px; }
 
 .verify.btn {
-  width: 45%;
-  height: 80px; }
+  height: 80px;
+  width: 40%; }
 
 hr.suggest {
   margin: 20px 0; }

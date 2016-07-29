@@ -176,20 +176,23 @@
                 To make sure you are not a robot, please verify with one of the following methods:
               </p>
             </label>
-            <button class="btn btn-default verify" @click="login" type="button">
-              Connect with
-              <br /><span class="fa-stack">
-<i class="fa fa-circle fa-stack-2x circleFb"></i>
-<i class="fa fa-facebook fa-stack-1x fa-inverse"></i>
-</span> or <span class="fa-stack">
-<i class="fa fa-circle fa-stack-2x circleGoogle"></i>
-<i class="fa fa-google-plus fa-stack-1x fa-inverse"></i>
-</span>
-            </button>
-            <span class="choice"> or </span>
-            <button class="btn btn-default verify" @click="showEmail" type="button">
-              Enter my email
-            </button>
+            <div class="text-center">
+              <button class="btn btn-default verify" @click="login" type="button">
+                Connect with
+                <br /><span class="fa-stack">
+  <i class="fa fa-circle fa-stack-2x circleFb"></i>
+  <i class="fa fa-facebook fa-stack-1x fa-inverse"></i>
+  </span> or <span class="fa-stack">
+  <i class="fa fa-circle fa-stack-2x circleGoogle"></i>
+  <i class="fa fa-google-plus fa-stack-1x fa-inverse"></i>
+  </span>
+              </button>
+              <span class="choice"> or </span>
+              <button class="btn btn-default verify" @click="showEmail" type="button">
+                Enter my email
+              </button>
+            </div>
+
           </div>
 
           <div class="form-group" v-show="noVerification || emailVerification" transition="expand">
