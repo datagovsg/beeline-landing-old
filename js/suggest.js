@@ -160,6 +160,12 @@ var vue = new Vue({
             scope: 'openid name email'
           }
         },
+        languageDictionary: {
+          title: 'Beeline Suggestions'
+        },
+        theme: {
+          logo: 'https://datagovsg.github.io/beeline-landing/images/beelineAuth0.png'
+        },
         autoclose: true,
       }),
     validation: {},
