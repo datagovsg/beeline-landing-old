@@ -30,7 +30,9 @@
       transition: ease 0.1s all;
       max-height: 999px;
     }
-    .expand-enter, .expand-leave {
+
+    .expand-enter,
+    .expand-leave {
       max-height: 0px;
       padding-top: 0;
       padding-bottom: 0;
@@ -103,11 +105,8 @@
             <label class="control-label">
               Start address
             </label>
-            <input type="text" placeholder="Street, Postal code, Building name, etc."
-                class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')"
-                v-validate="validation.originValid" validate-rule="validLatLng"
-                validate-value="suggestion.origin"
-                v-focus-placeholder="Click on the map, or type the name of the place.">
+            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')" v-validate="validation.originValid" validate-rule="validLatLng"
+                validate-value="suggestion.origin" v-focus-placeholder="Click on the map, or type the name of the place.">
             <div class="alert alert-info" transition="expand" v-show="validation.originValid && validation.originValid.touched && !validation.originValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span>
             </div>
@@ -116,10 +115,8 @@
           <div class="form-group">
             <label class="control-label">
               End address</label>
-            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')"
-                v-validate="validation.destinationValid" validate-rule="validLatLng"
-                validate-value="suggestion.destination"
-                v-focus-placeholder="Click on the map, or type the name of the place.">
+            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')" v-validate="validation.destinationValid"
+                validate-rule="validLatLng" validate-value="suggestion.destination" v-focus-placeholder="Click on the map, or type the name of the place.">
             <div class="alert alert-info" transition="expand" v-show="validation.destinationValid && validation.destinationValid.touched && !validation.destinationValid.valid">
               <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span></div>
           </div>
@@ -128,8 +125,7 @@
             <label class="control-label">
               Time at Destination
             </label>
-            <select class="form-control" v-model="arrivalTime" @focus="zoomOut()"
-              v-validate="validation.time" required>
+            <select class="form-control" v-model="arrivalTime" @focus="zoomOut()" v-validate="validation.time" required>
               <option value="" selected="selected">Select the time you want to arrive at your destination</option>
               <optgroup label="AM">
                 <option value="06:00">6:00 am</option>
@@ -152,8 +148,7 @@
                 <option value="8:30">8:30 pm</option>
               </optgroup>
             </select>
-            <div class="alert alert-info" transition="expand"
-                v-show="validation.time && validation.time.touched && !validation.time.valid">
+            <div class="alert alert-info" transition="expand" v-show="validation.time && validation.time.touched && !validation.time.valid">
               <i class="fa fa-info-circle"></i>
               <span class="small">
                 Please select the time you want to arrive at your destination.
@@ -164,21 +159,26 @@
           <div class="form-group">
             <div class="checkbox">
               <label>
-                <input type="checkbox" v-model="agreeTerms" v-validate="validation.agreeTerms"
-                    required>
-                    Yes, I read and agree to Beeline's <a class="btn-link" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a> and <a class="btn-link" href="ida_terms_of_use.html" target="_blank">Terms of use</a>.
+                <input type="checkbox" v-model="agreeTerms" v-validate="validation.agreeTerms" required>
+                <p class="small">
+                  Yes, I read and agree to Beeline's <a class="btn-link" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a> and <a class="btn-link" href="ida_terms_of_use.html" target="_blank">Terms of use</a>.
+                </p>
               </label>
             </div>
             <div class="alert alert-info" transition="expand" v-show="validation.agreeTerms && !validation.agreeTerms.valid">
               <i class="fa fa-info-circle"></i> <span class="small"> Please read and agree to the terms if you want to submit a route suggestions.</span>
             </div>
           </div>
-<hr>
+          <hr class="suggest">
           <div class="form-group">
             <label>
-              To make sure you are not a robot, please verify with one of the following methods: </label>
-            <button class="btn btn-default" @click="login" type="button">
-              Connect with <span class="fa-stack">
+              <p class="small robot">
+                To make sure you are not a robot, please verify with one of the following methods:
+              </p>
+            </label>
+            <button class="btn btn-default verify" @click="login" type="button">
+              Connect with
+              <br /><span class="fa-stack">
 <i class="fa fa-circle fa-stack-2x circleFb"></i>
 <i class="fa fa-facebook fa-stack-1x fa-inverse"></i>
 </span> or <span class="fa-stack">
@@ -187,43 +187,29 @@
 </span>
             </button>
             <span class="choice"> or </span>
-            <button class="btn btn-default" @click="showEmail" type="button">
+            <button class="btn btn-default verify" @click="showEmail" type="button">
               Enter my email
             </button>
           </div>
 
-          <div class="form-group" v-show="noVerification || emailVerification"
-          transition="expand">
+          <div class="form-group" v-show="noVerification || emailVerification" transition="expand">
             <label>
               Email Address
             </label>
-            <input type="email" class="form-control" v-model="email"
-              placeholder="Your Email Address" :disabled="emailVerification"
-              v-validate="validation.email" validate-rule="isEmail"
-              required>
+            <input type="email" class="form-control" v-model="email" placeholder="Your Email Address" :disabled="emailVerification" v-validate="validation.email" validate-rule="isEmail" required>
             <div class="alert alert-info" transition="expand" v-show="validation.email && validation.email.touched && !validation.email.valid">
               <i class="fa fa-info-circle"></i>
               <span class="small">Please enter a valid email address.</span>
             </div>
           </div>
           <div class="text-center">
-            <button type="submit" class="btn btn-primary btn-lg" :disabled="!formValid">
+            <button type="submit" class="btn btn-primary btn-lg submit" :disabled="!formValid">
               Submit Route Suggestion
             </button>
           </div>
-
           <!-- END: Authentication providers -->
-
-
-        </div>
-
-
-        <div>
-
         </div>
       </div>
-
-
 
       <div class="modal fade" tabindex="-1" role="dialog" id="submitted-dialog">
         <div class="modal-dialog" role="document">

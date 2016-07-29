@@ -14,41 +14,43 @@
   <meta property="og:description" content="Crowdsourced, direct shuttle to your destination" />
   <meta property="og:image" content="https://datagovsg.github.io/beeline-landing/images/beelineAppCover.png" />
   <meta name="google-signin-client_id" content="225350353651-lulsqicl7nrv40qt2pqpog2sgtpdkgjv.apps.googleusercontent.com">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">.
 
   <!--Mobile Specific Metas-->
-  <!-- <meta name="viewport" content="width=device-width, initial-scale=1"> -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!--FONT-->
   <link href='https://fonts.googleapis.com/css?family=Lato:400,300' rel='stylesheet' type='text/css'>
 
   <!--CSS-->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/meyer-reset/2.0/reset.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/4.2.0/normalize.min.css">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/animate.css">
 
+  <style>
+    .expand-transition {
+      transition: ease 0.1s all;
+      max-height: 999px;
+    }
+
+    .expand-enter,
+    .expand-leave {
+      max-height: 0px;
+      padding-top: 0;
+      padding-bottom: 0;
+      overflow: hidden;
+    }
+  </style>
+
   <!--JS-->
+  <script src="//cdn.auth0.com/js/lock/10.0/lock.min.js"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
   <script src="js/bootstrap.js"></script>
   <script src="https://use.fontawesome.com/e1c177a50d.js"></script>
   <script src="js/wow.min.js"></script>
+  <script src="js/landing.js"></script>
 
   <!--Favicon-->
   <link rel="icon" type="image/png" href="images/favicon.png">
 
-  <style>
-
-  google-map {
-    width: 100%;
-    height: 300px;
-    display: block;
-  }
-  .vue-map-container {
-    width: 100%; height:100%;
-  }
-
-  </style>
 </head>
 
 <body id="top">
@@ -76,20 +78,21 @@
       </div>
     </div>
   </nav>
-  <div class="container suggest" @submit="submit" v-cloak id="submit-form">
-    <h1 class="heading">Suggest a new route</h1>
-    <p>
-      Thank you! Your suggestion has been submitted.
-    </p>
-    <p>
 
-      <a href="/index.html" class="btn btn-primary">Back to home</a>
-    </p>
+  <div class="container">
+    <div class="suggest" @submit="submit" v-cloak id="submit-form">
+      <h1 class="heading">Suggest a new route</h1>
+      <p>
+        Thank you! Your suggestion has been submitted.
+      </p>
+      <p>
 
-  </form>
+        <a href="/index.html" class="btn btn-primary">Back to home</a>
+      </p>
 
-  <!-- /.row -->
-  <hr class="divider">
+    </div>
+
+  </div>
   <!-- FOOTER -->
   <footer class="footer">
 
@@ -98,11 +101,36 @@
       <p class="pull-left">&copy; 2016 Beeline Singapore. &nbsp; All rights reserved.</p>
       <p class="pull-right">
         <a class="links" href="#top">Back to top</a>&middot;
-        <a class="links" href="privacy.html">Privacy Policy</a>&middot;
-        <a class="links" href="termsofuse.html">Terms of Use</a>
+        <a class="links" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a>&middot;
+        <a class="links" href="ida_terms_of_use.html" target="_blank">Terms of Use</a>
       </p>
     </div>
   </footer>
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/1.0.26/vue.js"></script>
+  <script src="https://cdn.jsdelivr.net/vue.resource/0.9.3/vue-resource.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.13.1/lodash.min.js"></script>
+  <script src="js/vue-google-maps.js"></script>
+  <script src="js/suggest.transpiled.js"></script>
+  <script>
+    new WOW().init();
+  </script>
+  <script>
+    (function(i, s, o, g, r, a, m) {
+      i['GoogleAnalyticsObject'] = r;
+      i[r] = i[r] || function() {
+        (i[r].q = i[r].q || []).push(arguments)
+      }, i[r].l = 1 * new Date();
+      a = s.createElement(o),
+        m = s.getElementsByTagName(o)[0];
+      a.async = 1;
+      a.src = g;
+      m.parentNode.insertBefore(a, m)
+    })(window, document, 'script', 'https://www.google-analytics.com/analytics.js', 'ga');
+
+    ga('create', 'UA-79537959-3', 'auto');
+    ga('send', 'pageview');
+  </script>
 </body>
 
 </html>

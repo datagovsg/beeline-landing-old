@@ -292,7 +292,9 @@ hr.feature-divider {
   }
 }
 /* Lists Styling */
-.modal-body {
+.legal {
+  padding-top: 50px;
+  padding-bottom: 50px;
   h2 {
     font-size: 25px;
     margin-top: 20px;
@@ -416,4 +418,22 @@ google-map {
 
 .choice {
  padding: 0px 10px ;
+}
+
+.submit {
+  &.btn {
+    margin: 10px 0px;
+    padding: 10px 30px;
+  }
+}
+
+.verify {
+  &.btn{
+    width: 45%;
+    height: 80px;
+  }
+}
+
+hr.suggest {
+  margin: 20px 0;
 }
