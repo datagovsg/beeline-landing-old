@@ -381,7 +381,8 @@ hr.feature-divider {
 
 google-map {
   width: 100%;
-  height: 700px;
+  max-height: 700px;
+  height: 80vh;
   display: block;
   z-index: 10;
   position: relative;
