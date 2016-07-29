@@ -385,6 +385,14 @@ google-map {
   display: block;
   z-index: 10;
   position: relative;
+
+  @media (max-width: $screen-phone) {
+    height: 50vh;
+  }
+}
+
+.suggest.container {
+  min-height: 1100px; /* allow space for error messages */
 }
 
 .vue-map-container {
@@ -394,6 +402,7 @@ google-map {
 .alert {
   /* display: none; */
   margin-top: 10px;
+  margin-bottom: 0;
 }
 
 .circleFb {

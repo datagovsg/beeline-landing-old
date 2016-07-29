@@ -15,6 +15,24 @@ Vue.directive('place-autocomplete', {
   }
 })
 
+Vue.directive('visible', {
+  bind() {
+    var update = (expr) => {
+      if (expr) {
+        console.log('set to normal?')
+        this.el.style.visibility = 'visible';
+      }
+      else {
+        this.el.style.visibility = 'hidden';
+      }
+      console.log(this.el.style, expr, this.expression, this.el.style.visibility);
+    };
+
+    this.vm.$watch(this.expression, update)
+    update(this.vm.$eval(this.expression))
+  }
+});
+
 Vue.directive('validate', {
   params: ['validateRule', 'required', 'validateValue', 'vModel'],
   bind() {

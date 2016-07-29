@@ -76,14 +76,14 @@
       </div>
     </div>
   </nav>
-  <div class="container">
+  <div class="suggest container">
     <form class="suggest" @submit="submit" v-cloak id="submit-form">
       <h1 class="heading">Suggest a new route</h1>
       <div class="row">
 
         <!-- map start -->
         <div class="col-lg-7 col-md-6 col-sm-12 col-xs-12">
-          <div v-if="focusAt">
+          <div v-visible="focusAt">
             Click anywhere on the map to set the {{focusAt === 'origin' ? 'start' : 'end'}} address.
           </div>
           <google-map :center="center" :zoom="zoom" @g-click="click" v-ref:map :options="{
