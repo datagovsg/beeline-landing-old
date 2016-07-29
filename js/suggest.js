@@ -109,7 +109,7 @@ Vue.directive('validate', {
 })
 
 VueGoogleMap.load({
-  key: 'AIzaSyDC38zMc2TIj1-fvtLUdzNsgOQmTBb3N5M',
+  client: 'gme-infocommunications',
   libraries: 'places',
 })
 
