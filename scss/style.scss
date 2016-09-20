@@ -5,7 +5,6 @@
 body {
   font-family: 'Lato', sans-serif;
   font-weight: 300;
-  overflow-x: hidden;
 }
 .navbar {
   margin-bottom: 0;
@@ -35,41 +34,49 @@ body {
   }
 }
 
-.hand {
-  position: absolute;
-  display: block;
-  max-height: 820px;
-  max-width: 690px;
+.hand-div {
   width: 100vw;
-  height:auto;
-  right: -20%;
-  top: 15%;
+  overflow: hidden;
+  position: absolute;
+  height: 100%;
+  left: 0;
+  top: 0;
 
-
-
-  @media (min-width: $screen-phone) {
+  .hand {
+    position: absolute;
+    display: block;
+    max-height: 820px;
+    max-width: 690px;
     width: 100vw;
     height:auto;
-    right: -400px;
-    top: 10%;
-  }
-  @media (min-width: $screen-tablet) {
-    right: -300px;
-    top: 80px;
-  }
-  @media (min-width: $screen-desktop) {
-    right: -200px;
-    top: 80px;
-  }
-  @media (min-width: $screen-lg-desktop) {
-    right: -100px;
-    top: 80px;
-  }
-  @media (min-width: 1440px) {
-    right: 0px;
-    top: 80px;
+    right: -20%;
+    top: 15%;
+
+    @media (min-width: $screen-phone) {
+      width: 100vw;
+      height:auto;
+      right: -400px;
+      top: 10%;
+    }
+    @media (min-width: $screen-tablet) {
+      right: -300px;
+      top: 80px;
+    }
+    @media (min-width: $screen-desktop) {
+      right: -200px;
+      top: 80px;
+    }
+    @media (min-width: $screen-lg-desktop) {
+      right: -100px;
+      top: 80px;
+    }
+    @media (min-width: 1440px) {
+      right: 0px;
+      top: 80px;
+    }
   }
 }
+
 
 h1.heading {
   margin-bottom: $padding-large-vertical*6;
