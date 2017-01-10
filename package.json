@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "http-server -p 8090 .",
-    "build": "babel -o js/suggest.transpiled.js js/suggest.js && node-sass -o css scss",
+    "start": "http-server -c-1 -p 8090 www",
+    "build": "webpack && node-sass -o www/css scss",
     "watch": "babel --watch -o js/suggest.transpiled.js js/suggest.js & node-sass --watch -o css scss"
   },
   "repository": {
@@ -20,7 +20,18 @@
   },
   "homepage": "https://github.com/datagovsg/beeline-landing#readme",
   "dependencies": {
-    "http-server": "^0.9.0"
+    "babel-core": "^6.21.0",
+    "babel-plugin-transform-runtime": "^6.15.0",
+    "babel-polyfill": "^6.20.0",
+    "babel-preset-stage-2": "^6.18.0",
+    "css-loader": "^0.26.1",
+    "http-server": "^0.9.0",
+    "marker-clusterer-plus": "^2.1.4",
+    "node-sass": "^4.2.0",
+    "vue": "^2.1.8",
+    "vue-resource": "^1.0.3",
+    "vue-template-compiler": "^2.1.8",
+    "vue2-google-maps": "^0.5.0"
   },
   "devDependencies": {
     "babel": "^6.5.2",

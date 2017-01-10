@@ -1,117 +1,100 @@
-Vue.component('googleMap', VueGoogleMap.Map)
-Vue.component('googleMarker', VueGoogleMap.Marker)
-Vue.component('googlePolyline', VueGoogleMap.Polyline)
+const Vue = require('vue');
+const _ = require('lodash');
+const VueGoogleMaps = require('vue2-google-maps');
+const VueResource = require('vue-resource');
+const querystring = require('querystring');
 
-Vue.directive('place-autocomplete', {
-  params: ['place', 'bounds'],
-  bind() {
-    VueGoogleMap.loaded.then(() => {
-      var autocomplete = new google.maps.places.Autocomplete(this.el);
-
-      autocomplete.addListener('place_changed', (event) => {
-        this.vm.$set(this.params.place, autocomplete.getPlace())
-      })
-    })
+Vue.use(VueResource);
+Vue.use(VueGoogleMaps, {
+  load: {
+    client: 'gme-infocommunications',
+    libraries: 'places',
   }
 })
-
-/**
-  v-visible: to toggle the visibility depending on the expression
-**/
-Vue.directive('visible', {
-  bind() {
-    var update = (expr) => {
-      if (expr) {
-        console.log('set to normal?')
-        this.el.style.visibility = 'visible';
-      }
-      else {
-        this.el.style.visibility = 'hidden';
-      }
-      console.log(this.el.style, expr, this.expression, this.el.style.visibility);
-    };
-
-    this.vm.$watch(this.expression, update)
-    update(this.vm.$eval(this.expression))
-  }
-});
 
 /**
   v-focus-placeholder: Set a different placeholder when the input is in focus
 **/
 Vue.directive('focus-placeholder', {
-  bind() {
-    var originalPlaceholder = this.el.placeholder;
+  bind(el, bind) {
+    var originalPlaceholder = el.placeholder;
+    var focusPlaceholder = el.dataset.focusPlaceholder;
 
-    this.el.addEventListener('focus', () => {
-      this.el.placeholder = this.expression;
+    el.addEventListener('focus', () => {
+      el.placeholder = focusPlaceholder;
     })
-    this.el.addEventListener('blur', () => {
-      this.el.placeholder = originalPlaceholder;
+    el.addEventListener('blur', () => {
+      el.placeholder = originalPlaceholder;
     })
   }
 });
 
-Vue.directive('validate', {
-  params: ['validateRule', 'required', 'validateValue', 'vModel'],
-  bind() {
-    this.vm.$set(this.expression, {
+Vue.component('myValidate', {
+  props: ['validateRule', 'required', 'validateValue'],
+  data() {
+    return {
       touched: false,
-      valid: false,
-    })
-
-    //
-    var value = () => {
-      if (this.params.validateValue) {
-        return this.vm.$get(this.params.validateValue);
-      }
-      else if (this.params.vModel) {
-        return this.vm.$get(this.params.vModel);
-      }
-      else {
-        return this.el.value;
-      }
+      childComponent: null,
+      cachedValue: null,
     }
+  },
+  render(h) {
+    return this.$slots.default[0];
+  },
+  watch: {
+    touched() {
+      this.emit()
+    },
+    valid() {
+      this.emit()
+    },
+  },
+  mounted() {
+    this.childComponent = this.$children[0] ||
+      this.$el;
 
-    this.el.addEventListener('focus', () => {
-      var val = this.vm.$get(this.expression);
-      Vue.set(val, 'touched', true);
-    });
+    if (this.childComponent.$on) {
+      this.childComponent.$on('focus', () => this.touched = true)
+      this.childComponent.$on('input', (value) => this.cachedValue = value)
 
-    var runCheck = () => {
-      var val = value();
-      var validate = this.vm.$get(this.expression);
-
-      if (this.params.required && !val) {
-        validate.valid = false;
-        return;
+      if (this.childComponent.$el.addEventListener) {
+        this.childComponent.$el.addEventListener('focus', () => this.touched = true)
       }
-      if (this.params.validateRule) {
-        var rule = this.vm.$get(this.params.validateRule);
-        if (rule && !rule(val)) {
-          validate.valid = false;
-          return;
+    } else if (this.childComponent.addEventListener) {
+      this.childComponent.addEventListener('focus', () => this.touched = true)
+      this.childComponent.addEventListener('input', () => {
+        if (this.childComponent.type != 'checkbox') {
+          this.cachedValue = this.childComponent.value
         }
-      }
-      validate.valid = true;
-    };
+      })
+      this.childComponent.addEventListener('change', () => {
+        if (this.childComponent.type == 'checkbox') {
+          this.cachedValue = this.childComponent.checked
+        }
+      })
+    }
+  },
+  computed: {
+    finalValidationValue() {
+      var value1 = this.validateValue;
+      var value3 = this.cachedValue;
 
-    if (this.params.validateValue) {
-      this.vm.$watch(this.params.validateValue, runCheck);
+      return value1 || value3;
+    },
+    valid() {
+      return (!this.required || this.finalValidationValue) &&
+        (!this.validateRule || this.validateRule(this.finalValidationValue))
     }
-    else if (this.params.vModel) {
-      this.vm.$watch(this.params.vModel, runCheck);
-    }
-    else {
-      this.el.addEventListener('blur', runCheck);
-    }
-  }
-})
-
-VueGoogleMap.load({
-  client: 'gme-infocommunications',
-  libraries: 'places',
-})
+  },
+  methods: {
+    emit() {
+      this.$emit('validation-changed', {
+        touched: this.touched,
+        valid: this.valid,
+      });
+    },
+  },
+});
 
 const INIT = {
   zoom: 11,
@@ -122,7 +105,12 @@ var vue = new Vue({
   el: '#submit-form',
 
   data: {
-    Singapore: null,
+    Singapore: {
+      south: 1.199038,
+      west: 103.591472,
+      north: 1.522356,
+      east: 104.047404
+    },
     TimeGroups: [
       ['06:00', '06:30'],
       ['07:00', '07:30'],
@@ -138,14 +126,14 @@ var vue = new Vue({
     center: INIT.center,
     zoom: INIT.zoom,
     suggestion: {
-      origin: undefined,
+      origin: null,
       originPlace: undefined,
-      destination: undefined,
+      destination: null,
       destinationPlace: undefined,
       originText: '',
       destinationText: '',
     },
-    arrivalTime: undefined,
+    arrivalTime: '',
     emailVerification: null,
     email: '',
     noVerification: false,
@@ -168,7 +156,13 @@ var vue = new Vue({
         },
         autoclose: true,
       }),
-    validation: {},
+    validation: {
+      originValid: null,
+      destinationValid: null,
+      time: null,
+      agreeTerms: null,
+      email: null,
+    },
     isEmail(str) {
       return /.+@.+\..+/i.test(str);
     }
@@ -215,11 +209,11 @@ var vue = new Vue({
     },
   },
   created() {
-    this.geocoderPromise = VueGoogleMap.loaded.then(() => {
+    this.geocoderPromise = VueGoogleMaps.loaded.then(() => {
       return new google.maps.Geocoder;
     })
   },
-  ready() {
+  mounted() {
     this.lock.on('authenticated', (authResult) => {
       this.lock.getProfile(authResult.idToken, (error, profile) => {
         if (error) {
@@ -269,24 +263,23 @@ var vue = new Vue({
     },
     click(event) {
       if (this.focusAt) {
-        var focusAt = this.focusAt;
-        this.suggestion[this.focusAt] = event.latLng;
-
-        // Reverse geocode...
-        this.geocoderPromise.then((geocoder) => {
-          geocoder.geocode({location: event.latLng}, (results, status) => {
-            if (status === google.maps.GeocoderStatus.OK) {
-              if (results[0]) {
-                this.$set('suggestion.' + focusAt + 'Text',
-                          results[0].formatted_address);
-              }
-            }
-          })
-        })
+        this.setAndGeocodeLocation(this.focusAt, event.latLng)
       }
     },
-    placeChanged(which) {
-      console.log(which);
+    setAndGeocodeLocation(focusAt, latLng) {
+      this.suggestion[focusAt] = latLng;
+
+      // Reverse geocode...
+      this.geocoderPromise.then((geocoder) => {
+        geocoder.geocode({location: latLng}, (results, status) => {
+          if (status === google.maps.GeocoderStatus.OK) {
+            if (results[0]) {
+              this.$set(this.suggestion, `${focusAt}Text`,
+                        results[0].formatted_address);
+            }
+          }
+        })
+      })
     },
     zoomIn(where) {
       this.center = where;
@@ -340,12 +333,7 @@ var vue = new Vue({
   }
 })
 
-VueGoogleMap.loaded.then(() => {
-  vue.Singapore = new google.maps.LatLngBounds(
-    {lat: 1.199038, lng: 103.591472},
-    {lat: 1.522356, lng: 104.047404}
-  )
-
+VueGoogleMaps.loaded.then(() => {
   setTimeout(() => {
     var allAnchors = document.querySelectorAll('google-map a')
     for (var i=0; i<allAnchors.length; i++) {
@@ -353,3 +341,27 @@ VueGoogleMap.loaded.then(() => {
     }
   }, 1000)
 })
+
+/* If there is a lat lng given in the hash */
+; (function () {
+  var hash = window.location.hash;
+  if (!hash) return;
+  hash = hash.substr(1);
+  hash = querystring.parse(hash);
+
+  VueGoogleMaps.loaded.then(() => {
+    if (hash.originLat && hash.originLng) {
+      vue.setAndGeocodeLocation('origin', new google.maps.LatLng({
+        lat: parseFloat(hash.originLat),
+        lng: parseFloat(hash.originLng)
+      }))
+    }
+
+    if (hash.destinationLat && hash.destinationLng) {
+      vue.setAndGeocodeLocation('destination', new google.maps.LatLng({
+        lat: parseFloat(hash.destinationLat),
+        lng: parseFloat(hash.destinationLng)
+      }))
+    }
+  });
+})();

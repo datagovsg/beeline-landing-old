@@ -1,8 +1,15 @@
 'use strict';
 
-Vue.component('googleMap', VueGoogleMap.Map);
-Vue.component('googleMarker', VueGoogleMap.Marker);
-Vue.component('googlePolyline', VueGoogleMap.Polyline);
+var Vue = require('vue');
+var _ = require('lodash');
+var VueGoogleMaps = require('vue2-google-maps');
+
+Vue.use(VueGoogleMaps, {
+  load: {
+    client: 'gme-infocommunications',
+    libraries: 'places'
+  }
+});
 
 Vue.directive('place-autocomplete', {
   params: ['place', 'bounds'],
@@ -113,11 +120,6 @@ Vue.directive('validate', {
   }
 });
 
-VueGoogleMap.load({
-  client: 'gme-infocommunications',
-  libraries: 'places'
-});
-
 var INIT = {
   zoom: 11,
   center: { lat: 1.38, lng: 103.8 }
@@ -200,7 +202,7 @@ var vue = new Vue({
       return new google.maps.Geocoder();
     });
   },
-  ready: function ready() {
+  mounted: function mounted() {
     var _this5 = this;
 
     this.lock.on('authenticated', function (authResult) {
@@ -324,7 +326,7 @@ var vue = new Vue({
   }
 });
 
-VueGoogleMap.loaded.then(function () {
+VueGoogleMaps.loaded.then(function () {
   vue.Singapore = new google.maps.LatLngBounds({ lat: 1.199038, lng: 103.591472 }, { lat: 1.522356, lng: 104.047404 });
 
   setTimeout(function () {
