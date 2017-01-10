@@ -8192,108 +8192,120 @@
 /* 298 */
 /***/ function(module, exports, __webpack_require__) {
 
-	const Vue = __webpack_require__(299);
-	const _ = __webpack_require__(300);
-	const VueGoogleMaps = __webpack_require__(302);
-	const VueResource = __webpack_require__(439);
-	const querystring = __webpack_require__(440);
+	'use strict';
+
+	var Vue = __webpack_require__(299);
+	var _ = __webpack_require__(300);
+	var VueGoogleMaps = __webpack_require__(302);
+	var VueResource = __webpack_require__(439);
+	var querystring = __webpack_require__(440);
 
 	Vue.use(VueResource);
 	Vue.use(VueGoogleMaps, {
 	  load: {
 	    client: 'gme-infocommunications',
-	    libraries: 'places',
+	    libraries: 'places'
 	  }
-	})
+	});
 
 	/**
 	  v-focus-placeholder: Set a different placeholder when the input is in focus
 	**/
 	Vue.directive('focus-placeholder', {
-	  bind(el, bind) {
+	  bind: function bind(el, _bind) {
 	    var originalPlaceholder = el.placeholder;
 	    var focusPlaceholder = el.dataset.focusPlaceholder;
 
-	    el.addEventListener('focus', () => {
+	    el.addEventListener('focus', function () {
 	      el.placeholder = focusPlaceholder;
-	    })
-	    el.addEventListener('blur', () => {
+	    });
+	    el.addEventListener('blur', function () {
 	      el.placeholder = originalPlaceholder;
-	    })
+	    });
 	  }
 	});
 
 	Vue.component('myValidate', {
 	  props: ['validateRule', 'required', 'validateValue'],
-	  data() {
+	  data: function data() {
 	    return {
 	      touched: false,
 	      childComponent: null,
-	      cachedValue: null,
-	    }
+	      cachedValue: null
+	    };
 	  },
-	  render(h) {
+	  render: function render(h) {
 	    return this.$slots.default[0];
 	  },
+
 	  watch: {
-	    touched() {
-	      this.emit()
+	    touched: function touched() {
+	      this.emit();
 	    },
-	    valid() {
-	      this.emit()
-	    },
-	  },
-	  mounted() {
-	    this.childComponent = this.$children[0] ||
-	      this.$el;
-
-	    if (this.childComponent.$on) {
-	      this.childComponent.$on('focus', () => this.touched = true)
-	      this.childComponent.$on('input', (value) => this.cachedValue = value)
-
-	      if (this.childComponent.$el.addEventListener) {
-	        this.childComponent.$el.addEventListener('focus', () => this.touched = true)
-	      }
-	    } else if (this.childComponent.addEventListener) {
-	      this.childComponent.addEventListener('focus', () => this.touched = true)
-	      this.childComponent.addEventListener('input', () => {
-	        if (this.childComponent.type != 'checkbox') {
-	          this.cachedValue = this.childComponent.value
-	        }
-	      })
-	      this.childComponent.addEventListener('change', () => {
-	        if (this.childComponent.type == 'checkbox') {
-	          this.cachedValue = this.childComponent.checked
-	        }
-	      })
+	    valid: function valid() {
+	      this.emit();
 	    }
 	  },
+	  mounted: function mounted() {
+	    var _this = this;
+
+	    this.childComponent = this.$children[0] || this.$el;
+
+	    if (this.childComponent.$on) {
+	      this.childComponent.$on('focus', function () {
+	        return _this.touched = true;
+	      });
+	      this.childComponent.$on('input', function (value) {
+	        return _this.cachedValue = value;
+	      });
+
+	      if (this.childComponent.$el.addEventListener) {
+	        this.childComponent.$el.addEventListener('focus', function () {
+	          return _this.touched = true;
+	        });
+	      }
+	    } else if (this.childComponent.addEventListener) {
+	      this.childComponent.addEventListener('focus', function () {
+	        return _this.touched = true;
+	      });
+	      this.childComponent.addEventListener('input', function () {
+	        if (_this.childComponent.type != 'checkbox') {
+	          _this.cachedValue = _this.childComponent.value;
+	        }
+	      });
+	      this.childComponent.addEventListener('change', function () {
+	        if (_this.childComponent.type == 'checkbox') {
+	          _this.cachedValue = _this.childComponent.checked;
+	        }
+	      });
+	    }
+	  },
+
 	  computed: {
-	    finalValidationValue() {
+	    finalValidationValue: function finalValidationValue() {
 	      var value1 = this.validateValue;
 	      var value3 = this.cachedValue;
 
 	      return value1 || value3;
 	    },
-	    valid() {
-	      return (!this.required || this.finalValidationValue) &&
-	        (!this.validateRule || this.validateRule(this.finalValidationValue))
+	    valid: function valid() {
+	      return (!this.required || this.finalValidationValue) && (!this.validateRule || this.validateRule(this.finalValidationValue));
 	    }
 	  },
 	  methods: {
-	    emit() {
+	    emit: function emit() {
 	      this.$emit('validation-changed', {
 	        touched: this.touched,
-	        valid: this.valid,
+	        valid: this.valid
 	      });
-	    },
-	  },
+	    }
+	  }
 	});
 
-	const INIT = {
+	var INIT = {
 	  zoom: 11,
-	  center: {lat: 1.38, lng: 103.8}
-	}
+	  center: { lat: 1.38, lng: 103.8 }
+	};
 
 	var vue = new Vue({
 	  el: '#submit-form',
@@ -8305,18 +8317,7 @@
 	      north: 1.522356,
 	      east: 104.047404
 	    },
-	    TimeGroups: [
-	      ['06:00', '06:30'],
-	      ['07:00', '07:30'],
-	      ['08:00', '08:30'],
-	      ['09:00', '09:30'],
-	      ['10:00', '10:30'],
-	      ['11:00', '11:30'],
-	      ['12:00', '12:30'],
-	      ['13:00', '13:30'],
-	      ['14:00', '14:30'],
-	      ['15:00', '15:30'],
-	    ],
+	    TimeGroups: [['06:00', '06:30'], ['07:00', '07:30'], ['08:00', '08:30'], ['09:00', '09:30'], ['10:00', '10:30'], ['11:00', '11:30'], ['12:00', '12:30'], ['13:00', '13:30'], ['14:00', '14:30'], ['15:00', '15:30']],
 	    center: INIT.center,
 	    zoom: INIT.zoom,
 	    suggestion: {
@@ -8325,7 +8326,7 @@
 	      destination: null,
 	      destinationPlace: undefined,
 	      originText: '',
-	      destinationText: '',
+	      destinationText: ''
 	    },
 	    arrivalTime: '',
 	    emailVerification: null,
@@ -8333,102 +8334,94 @@
 	    noVerification: false,
 	    agreeTerms: false,
 	    focusAt: null,
-	    lock: new Auth0Lock(
-	      'PwDT8IepW58tRCqZlLQkFKxKpuYrgNAp',
-	      'beeline-suggestions.auth0.com', {
-	        auth: {
-	          redirect: false,
-	          params: {
-	            scope: 'openid name email'
-	          }
-	        },
-	        languageDictionary: {
-	          title: 'Beeline Suggestions'
-	        },
-	        theme: {
-	          logo: 'https://datagovsg.github.io/beeline-landing/images/beelineAuth0.png'
-	        },
-	        autoclose: true,
-	      }),
+	    lock: new Auth0Lock('PwDT8IepW58tRCqZlLQkFKxKpuYrgNAp', 'beeline-suggestions.auth0.com', {
+	      auth: {
+	        redirect: false,
+	        params: {
+	          scope: 'openid name email'
+	        }
+	      },
+	      languageDictionary: {
+	        title: 'Beeline Suggestions'
+	      },
+	      theme: {
+	        logo: 'https://datagovsg.github.io/beeline-landing/images/beelineAuth0.png'
+	      },
+	      autoclose: true
+	    }),
 	    validation: {
 	      originValid: null,
 	      destinationValid: null,
 	      time: null,
 	      agreeTerms: null,
-	      email: null,
+	      email: null
 	    },
-	    isEmail(str) {
-	      return /.+@.+\..+/i.test(str);
+	    isEmail: function isEmail(str) {
+	      return (/.+@.+\..+/i.test(str)
+	      );
 	    }
 	  },
 	  computed: {
-	    formValid() {
-	      return _.every([
-	        this.suggestion.origin,
-	        this.suggestion.destination,
-	        this.email,
-	        this.arrivalTime,
-	        this.agreeTerms
-	      ])
+	    formValid: function formValid() {
+	      return _.every([this.suggestion.origin, this.suggestion.destination, this.email, this.arrivalTime, this.agreeTerms]);
 	    },
-	    path() {
-	      if (_.get(this.suggestion, 'origin') &&
-	          _.get(this.suggestion, 'destination')) {
-	        return [
-	          this.suggestion.origin,
-	          this.suggestion.destination
-	        ]
+	    path: function path() {
+	      if (_.get(this.suggestion, 'origin') && _.get(this.suggestion, 'destination')) {
+	        return [this.suggestion.origin, this.suggestion.destination];
 	      }
 	      return false;
 	    }
 	  },
 	  watch: {
-	    'suggestion.originPlace'(place) {
+	    'suggestion.originPlace': function suggestionOriginPlace(place) {
 	      if (place && place.geometry) {
-	        this.suggestion.origin = place.geometry.location
+	        this.suggestion.origin = place.geometry.location;
 	        this.zoomIn(this.suggestion.origin);
-	      }
-	      else {
+	      } else {
 	        console.log(place);
 	      }
 	    },
-	    'suggestion.destinationPlace'(place) {
+	    'suggestion.destinationPlace': function suggestionDestinationPlace(place) {
 	      if (place && place.geometry) {
-	        this.suggestion.destination = place.geometry.location
+	        this.suggestion.destination = place.geometry.location;
 	        this.zoomIn(this.suggestion.destination);
-	      }
-	      else {
+	      } else {
 	        console.log(place);
 	      }
-	    },
+	    }
 	  },
-	  created() {
-	    this.geocoderPromise = VueGoogleMaps.loaded.then(() => {
-	      return new google.maps.Geocoder;
-	    })
+	  created: function created() {
+	    this.geocoderPromise = VueGoogleMaps.loaded.then(function () {
+	      return new google.maps.Geocoder();
+	    });
 	  },
-	  mounted() {
-	    this.lock.on('authenticated', (authResult) => {
-	      this.lock.getProfile(authResult.idToken, (error, profile) => {
+	  mounted: function mounted() {
+	    var _this2 = this;
+
+	    this.lock.on('authenticated', function (authResult) {
+	      _this2.lock.getProfile(authResult.idToken, function (error, profile) {
 	        if (error) {
 	          alert("Your email could not be verified");
 	          return;
 	        }
 
-	        this.email = profile.email;
-	        this.emailVerification = {
+	        _this2.email = profile.email;
+	        _this2.emailVerification = {
 	          type: 'auth0',
-	          data: authResult.idToken,
+	          data: authResult.idToken
 	        };
 	      });
-	    })
+	    });
 	  },
+
 	  methods: {
-	    submit(event) {
+	    submit: function submit(event) {
+	      var _this3 = this;
+
 	      event.preventDefault();
 
 	      // compute time as seconds past midnight
-	      var splitTime = this.arrivalTime.split(':')
+	      var splitTime = this.arrivalTime.split(':');
 	      var time = splitTime[0] * 3600000 + splitTime[1] * 60000;
 
 	      this.$http.post('https://api.beeline.sg/suggestions/web', {
@@ -8439,127 +8432,124 @@
 	        alightLon: this.suggestion.destination.lng(),
 	        email: this.email,
 	        emailVerification: this.emailVerification
-	      })
-	      .then((success) => {
-	        $('#submitted-dialog').modal('show')
-	          .on('hidden.bs.modal', () => {
-	            window.location.href="suggestSubmitted.html"
-	          });
+	      }).then(function (success) {
+	        $('#submitted-dialog').modal('show').on('hidden.bs.modal', function () {
+	          window.location.href = "suggestSubmitted.html";
+	        });
 
-	        this.time = null;
-	        this.suggestion = {
+	        _this3.time = null;
+	        _this3.suggestion = {
 	          origin: null, destination: null, originPlace: null,
 	          destinationPlace: null
 	        };
-	      }, (error) => {
+	      }, function (error) {
 	        $('#submitted-error-dialog').modal('show');
-	      })
+	      });
 	    },
-	    click(event) {
+	    click: function click(event) {
 	      if (this.focusAt) {
-	        this.setAndGeocodeLocation(this.focusAt, event.latLng)
+	        this.setAndGeocodeLocation(this.focusAt, event.latLng);
 	      }
 	    },
-	    setAndGeocodeLocation(focusAt, latLng) {
+	    setAndGeocodeLocation: function setAndGeocodeLocation(focusAt, latLng) {
+	      var _this4 = this;
+
 	      this.suggestion[focusAt] = latLng;
 
 	      // Reverse geocode...
-	      this.geocoderPromise.then((geocoder) => {
-	        geocoder.geocode({location: latLng}, (results, status) => {
+	      this.geocoderPromise.then(function (geocoder) {
+	        geocoder.geocode({ location: latLng }, function (results, status) {
 	          if (status === google.maps.GeocoderStatus.OK) {
 	            if (results[0]) {
-	              this.$set(this.suggestion, `${focusAt}Text`,
-	                        results[0].formatted_address);
+	              _this4.$set(_this4.suggestion, focusAt + 'Text', results[0].formatted_address);
 	            }
 	          }
-	        })
-	      })
+	        });
+	      });
 	    },
-	    zoomIn(where) {
+	    zoomIn: function zoomIn(where) {
 	      this.center = where;
 	      this.zoom = 15;
 	    },
-	    zoomOut() {
+	    zoomOut: function zoomOut() {
 	      if (this.suggestion.origin && this.suggestion.destination) {
 	        var bounds = new google.maps.LatLngBounds();
 	        bounds.extend(this.suggestion.origin);
 	        bounds.extend(this.suggestion.destination);
 	        this.$refs.map.fitBounds(bounds);
-	      }
-	      else {
+	      } else {
 	        this.center = INIT.center;
 	        this.zoom = INIT.zoom;
 	      }
 	    },
-	    focusIn(which) {
+	    focusIn: function focusIn(which) {
 	      this.focusAt = which;
 	    },
-	    focusOut(which) {
+	    focusOut: function focusOut(which) {
 	      if (this.focusAt === which) {
 	        this.focusAt = null;
 	      }
 	    },
-	    login() {
+	    login: function login() {
+	      var _this5 = this;
+
 	      this.lock.show({
-	        responseType: 'token',
-	      }, (error, profile, idToken) => {
+	        responseType: 'token'
+	      }, function (error, profile, idToken) {
 	        if (error) {
 	          alert("Your email could not be verified");
 	          return;
 	        }
 
-	        this.email = profile.email;
-	        this.emailVerification = {
+	        _this5.email = profile.email;
+	        _this5.emailVerification = {
 	          type: 'auth0',
-	          data: idToken,
-	        }
-	      })
+	          data: idToken
+	        };
+	      });
 	    },
-	    validLatLng(latlng) {
-	      return latlng &&
-	          (latlng.lat() >= 1 && latlng.lat() <= 2) &&
-	          (latlng.lng() >= 100 && latlng.lng() <= 105)
+	    validLatLng: function validLatLng(latlng) {
+	      return latlng && latlng.lat() >= 1 && latlng.lat() <= 2 && latlng.lng() >= 100 && latlng.lng() <= 105;
 	    },
-	    showEmail() {
+	    showEmail: function showEmail() {
 	      this.emailVerification = null;
 	      this.noVerification = true;
 	    }
 	  }
-	})
+	});
 
-	VueGoogleMaps.loaded.then(() => {
-	  setTimeout(() => {
-	    var allAnchors = document.querySelectorAll('google-map a')
-	    for (var i=0; i<allAnchors.length; i++) {
+	VueGoogleMaps.loaded.then(function () {
+	  setTimeout(function () {
+	    var allAnchors = document.querySelectorAll('google-map a');
+	    for (var i = 0; i < allAnchors.length; i++) {
 	      allAnchors[i].tabIndex = -1;
 	    }
-	  }, 1000)
+	  }, 1000);
 	})
 
 	/* If there is a lat lng given in the hash */
-	; (function () {
+	;(function () {
 	  var hash = window.location.hash;
 	  if (!hash) return;
 	  hash = hash.substr(1);
 	  hash = querystring.parse(hash);
 
-	  VueGoogleMaps.loaded.then(() => {
+	  VueGoogleMaps.loaded.then(function () {
 	    if (hash.originLat && hash.originLng) {
 	      vue.setAndGeocodeLocation('origin', new google.maps.LatLng({
 	        lat: parseFloat(hash.originLat),
 	        lng: parseFloat(hash.originLng)
-	      }))
+	      }));
 	    }
 
 	    if (hash.destinationLat && hash.destinationLng) {
 	      vue.setAndGeocodeLocation('destination', new google.maps.LatLng({
 	        lat: parseFloat(hash.destinationLat),
 	        lng: parseFloat(hash.destinationLng)
-	      }))
+	      }));
 	    }
 	  });
 	})();
-
 
 /***/ },
 /* 299 */
