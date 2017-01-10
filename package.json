@@ -8,7 +8,7 @@
     "start": "http-server -c-1 -p 8090 www",
     "build": "webpack && node-sass -o www/css scss",
     "deploy": "gh-pages -d www",
-    "watch": "babel --watch -o js/suggest.transpiled.js js/suggest.js & node-sass --watch -o css scss"
+    "watch": "webpack -w -d & node-sass --watch -o css scss"
   },
   "repository": {
     "type": "git",
