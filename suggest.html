@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
 
   <!--Basic Page Needs-->
@@ -26,13 +25,15 @@
   <link rel="stylesheet" href="css/animate.css">
 
   <style>
-    .expand-transition {
-      transition: ease 0.1s all;
-      max-height: 999px;
+    label .form-control {
+      font-weight: normal;
     }
 
-    .expand-enter,
-    .expand-leave {
+    .expand-enter-active, .expand-leave-active {
+      transition: linear .1s all;
+      max-height: 999px;
+    }
+    .expand-enter, .expand-leave-active {
       max-height: 0px;
       padding-top: 0;
       padding-bottom: 0;
@@ -41,7 +42,7 @@
   </style>
 
   <!--JS-->
-  <script src="//cdn.auth0.com/js/lock/10.0/lock.min.js"></script>
+  <script src="//cdn.auth0.com/js/lock/10.7/lock.min.js"></script>
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
   <script src="js/bootstrap.js"></script>
   <script src="https://use.fontawesome.com/e1c177a50d.js"></script>
@@ -85,17 +86,19 @@
 
         <!-- map start -->
         <div class="col-lg-7 col-md-6 col-sm-12 col-xs-12">
-          <google-map :center="center" :zoom="zoom" @g-click="click" v-ref:map :options="{
+          <gmap-map :center="center" :zoom="zoom"
+              class="gmap"
+              @click="click" ref="map" :options="{
             clickableIcons: false,
             disableDefaultUi: true,
           }">
-            <google-marker v-if="suggestion.origin" :position="suggestion.origin" label="S">
-            </google-marker>
-            <google-marker v-if="suggestion.destination" :position="suggestion.destination" label="E">
-            </google-marker>
-            <google-polyline v-if="path" :path="path">
-            </google-polyline>
-          </google-map>
+            <gmap-marker v-if="suggestion.origin" :position="suggestion.origin" label="S">
+            </gmap-marker>
+            <gmap-marker v-if="suggestion.destination" :position="suggestion.destination" label="E">
+            </gmap-marker>
+            <gmap-polyline v-if="path" :path="path">
+            </gmap-polyline>
+          </gmap-map>
         </div>
         <!-- map ends -->
 
@@ -104,70 +107,119 @@
           <div class="form-group">
             <label class="control-label">
               Start address
+              <my-validate
+                :validate-value="suggestion.origin"
+                :validate-rule="validLatLng"
+                @validation-changed="validation.originValid = $event"
+                :required="true"
+              >
+                <gmap-autocomplete type="text"
+                  placeholder="Street, Postal code, Building name, etc."
+                  class="form-control" v-model="suggestion.originText"
+                  :value="suggestion.originText"
+                  :component-restrictions="{country: 'SG'}"
+                  @focus.native="focusIn('origin')"
+                  v-focus-placeholder
+                  data-focus-placeholder="Click on the map, or type the name of the place.">
+                </gmap-autocomplete>
+              </my-validate>
             </label>
-            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.originText" place="suggestion.originPlace" @focus="focusIn('origin')" v-validate="validation.originValid" validate-rule="validLatLng"
-                validate-value="suggestion.origin" v-focus-placeholder="Click on the map, or type the name of the place.">
-            <div class="alert alert-info" transition="expand" v-show="validation.originValid && validation.originValid.touched && !validation.originValid.valid">
-              <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span>
-            </div>
+            <transition name="expand" css appear>
+              <div class="alert alert-info" v-show="validation.originValid && validation.originValid.touched && !validation.originValid.valid">
+                <i class="fa fa-info-circle"></i>
+                <span class="small">Please enter a valid Singapore address.</span>
+              </div>
+            </transition>
           </div>
 
           <div class="form-group">
             <label class="control-label">
-              End address</label>
-            <input type="text" placeholder="Street, Postal code, Building name, etc." class="form-control" v-place-autocomplete v-model="suggestion.destinationText" place="suggestion.destinationPlace" @focus="focusIn('destination')" v-validate="validation.destinationValid"
-                validate-rule="validLatLng" validate-value="suggestion.destination" v-focus-placeholder="Click on the map, or type the name of the place.">
-            <div class="alert alert-info" transition="expand" v-show="validation.destinationValid && validation.destinationValid.touched && !validation.destinationValid.valid">
-              <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span></div>
+              End address
+              <my-validate
+                :validate-value="suggestion.destination"
+                :validate-rule="validLatLng"
+                @validation-changed="validation.destinationValid = $event"
+                :required="true"
+              >
+                <gmap-autocomplete type="text"
+                  placeholder="Street, Postal code, Building name, etc."
+                  class="form-control" v-model="suggestion.destinationText"
+                  :value="suggestion.destinationText"
+                  @focus.native="focusIn('destination')"
+                  :component-restrictions="{country: 'SG'}"
+                  v-focus-placeholder
+                  data-focus-placeholder="Click on the map, or type the name of the place.">
+                </gmap-autocomplete>
+              </my-validate>
+            </label>
+            <transition name="expand">
+              <div class="alert alert-info" v-show="validation.destinationValid && validation.destinationValid.touched && !validation.destinationValid.valid">
+                <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span>
+              </div>
+            </transition>
           </div>
 
           <div class="form-group">
             <label class="control-label">
               Time at Destination
+              <my-validate
+                :required="true"
+                @validation-changed="validation.time = $event"
+              >
+                <select class="form-control" v-model="arrivalTime" @focus="zoomOut()">
+                  <option value="">Select the time you want to arrive at your destination</option>
+                  <optgroup label="AM">
+                    <option value="06:00">6:00 am</option>
+                    <option value="06:30">6:30 am</option>
+                    <option value="07:00">7:00 am</option>
+                    <option value="07:30">7:30 am</option>
+                    <option value="08:00">8:00 am</option>
+                    <option value="08:30">8:30 am</option>
+                    <option value="09:00">9:00 am</option>
+                    <option value="09:30">9:30 am</option>
+                  </optgroup>
+                  <optgroup label="PM">
+                    <option value="5:00">5:00 pm</option>
+                    <option value="5:30">5:30 pm</option>
+                    <option value="6:00">6:00 pm</option>
+                    <option value="6:30">6:30 pm</option>
+                    <option value="7:00">7:00 pm</option>
+                    <option value="7:30">7:30 pm</option>
+                    <option value="8:00">8:00 pm</option>
+                    <option value="8:30">8:30 pm</option>
+                  </optgroup>
+                </select>
+              </my-validate>
             </label>
-            <select class="form-control" v-model="arrivalTime" @focus="zoomOut()" v-validate="validation.time" required>
-              <option value="" selected="selected">Select the time you want to arrive at your destination</option>
-              <optgroup label="AM">
-                <option value="06:00">6:00 am</option>
-                <option value="06:30">6:30 am</option>
-                <option value="07:00">7:00 am</option>
-                <option value="07:30">7:30 am</option>
-                <option value="08:00">8:00 am</option>
-                <option value="08:30">8:30 am</option>
-                <option value="09:00">9:00 am</option>
-                <option value="09:30">9:30 am</option>
-              </optgroup>
-              <optgroup label="PM">
-                <option value="5:00">5:00 pm</option>
-                <option value="5:30">5:30 pm</option>
-                <option value="6:00">6:00 pm</option>
-                <option value="6:30">6:30 pm</option>
-                <option value="7:00">7:00 pm</option>
-                <option value="7:30">7:30 pm</option>
-                <option value="8:00">8:00 pm</option>
-                <option value="8:30">8:30 pm</option>
-              </optgroup>
-            </select>
-            <div class="alert alert-info" transition="expand" v-show="validation.time && validation.time.touched && !validation.time.valid">
-              <i class="fa fa-info-circle"></i>
-              <span class="small">
-                Please select the time you want to arrive at your destination.
-              </span>
-            </div>
+            <transition name="expand">
+              <div class="alert alert-info" v-show="validation.time && validation.time.touched && !validation.time.valid">
+                <i class="fa fa-info-circle"></i>
+                <span class="small">
+                  Please select the time you want to arrive at your destination.
+                </span>
+              </div>
+            </transition>
           </div>
 
           <div class="form-group">
             <div class="checkbox">
               <label>
-                <input type="checkbox" v-model="agreeTerms" v-validate="validation.agreeTerms" required>
+                <my-validate
+                  :required="true"
+                  @validation-changed="validation.agreeTerms = $event"
+                >
+                  <input type="checkbox" v-model="agreeTerms">
+                </my-validate>
                 <p class="small">
-                  Yes, I read and agree to Beeline's <a class="btn-link" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a> and <a class="btn-link" href="ida_terms_of_use.html" target="_blank">Terms of use</a>.
+                  Yes, I read and agree to Beeline's <a class="btn-link" href="privacy_policy.html" target="_blank">Privacy Policy</a> and <a class="btn-link" href="terms_of_use.html" target="_blank">Terms of use</a>.
                 </p>
               </label>
             </div>
-            <div class="alert alert-info" transition="expand" v-show="validation.agreeTerms && !validation.agreeTerms.valid">
-              <i class="fa fa-info-circle"></i> <span class="small"> Please read and agree to the terms if you want to submit a route suggestions.</span>
-            </div>
+            <transition name="expand" css appear>
+              <div class="alert alert-info" v-show="validation.agreeTerms && !validation.agreeTerms.valid">
+                <i class="fa fa-info-circle"></i> <span class="small"> Please read and agree to the terms if you want to submit a route suggestions.</span>
+              </div>
+            </transition>
           </div>
           <hr class="suggest">
           <div class="form-group">
@@ -195,16 +247,28 @@
 
           </div>
 
-          <div class="form-group" v-show="noVerification || emailVerification" transition="expand">
-            <label>
-              Email Address
-            </label>
-            <input type="email" class="form-control" v-model="email" placeholder="Your Email Address" :disabled="emailVerification" v-validate="validation.email" validate-rule="isEmail" required>
-            <div class="alert alert-info" transition="expand" v-show="validation.email && validation.email.touched && !validation.email.valid">
-              <i class="fa fa-info-circle"></i>
-              <span class="small">Please enter a valid email address.</span>
+          <transition name="expand">
+            <div class="form-group" v-show="noVerification || emailVerification">
+              <label>
+                Email Address
+              </label>
+
+              <my-validate
+                :required="true"
+                :validate-rule="isEmail"
+                @validation-changed="validation.email = $event"
+              >
+                <input type="email" class="form-control" v-model="email"
+                placeholder="Your Email Address" :disabled="emailVerification">
+              </my-validate>
+              <transition name="expand">
+                <div class="alert alert-info" v-show="validation.email && validation.email.touched && !validation.email.valid">
+                  <i class="fa fa-info-circle"></i>
+                  <span class="small">Please enter a valid email address.</span>
+                </div>
+              </transition>
             </div>
-          </div>
+          </transition>
           <div class="text-center">
             <button type="submit" class="btn btn-primary btn-lg submit" :disabled="!formValid">
               Submit Route Suggestion
@@ -274,16 +338,12 @@
       <p class="pull-left">&copy; 2016 Beeline Singapore. &nbsp; All rights reserved.</p>
       <p class="pull-right">
         <a class="links" href="#top">Back to top</a>&middot;
-        <a class="links" href="ida_privacy_policy.html" target="_blank">Privacy Policy</a>&middot;
-        <a class="links" href="ida_terms_of_use.html" target="_blank">Terms of Use</a>
+        <a class="links" href="privacy_policy.html" target="_blank">Privacy Policy</a>&middot;
+        <a class="links" href="terms_of_use.html" target="_blank">Terms of Use</a>
       </p>
     </div>
   </footer>
   <!-- Scripts -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/1.0.26/vue.js"></script>
-  <script src="https://cdn.jsdelivr.net/vue.resource/0.9.3/vue-resource.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.13.1/lodash.min.js"></script>
-  <script src="js/vue-google-maps.js"></script>
   <script src="js/suggest.transpiled.js"></script>
   <script>
     new WOW().init();
