@@ -249,7 +249,11 @@ var vue = new Vue({
       .then((success) => {
         $('#submitted-dialog').modal('show')
           .on('hidden.bs.modal', () => {
-            window.location.href="suggestSubmitted.html"
+            if (this.emailVerification) {
+              window.location.href = "suggestSubmitted.html"
+            } else {
+              window.location.href = "suggestVerify.html"
+            }
           });
 
         this.time = null;
