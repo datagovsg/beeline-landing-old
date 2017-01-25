@@ -3,6 +3,7 @@ const _ = require('lodash');
 const VueGoogleMaps = require('vue2-google-maps');
 const VueResource = require('vue-resource');
 const querystring = require('querystring');
+const mapSettings = require('./mapSettings.js').default;
 
 Vue.use(VueResource);
 Vue.use(VueGoogleMaps, {
@@ -29,6 +30,8 @@ Vue.directive('focus-placeholder', {
   }
 });
 
+Vue.component('similarRequests', require('./similarRequests.vue'));
+Vue.component('requestsTimeHistogram', require('./requestsTimeHistogram.vue'));
 Vue.component('myValidate', {
   props: ['validateRule', 'required', 'validateValue'],
   data() {
@@ -156,6 +159,11 @@ var vue = new Vue({
         },
         autoclose: true,
       }),
+    mapSettings,
+    similarRequests: {
+      requests: [],
+      hoveredRequest: null,
+    },
     validation: {
       originValid: null,
       destinationValid: null,
@@ -207,6 +215,8 @@ var vue = new Vue({
         console.log(place);
       }
     },
+    'suggestion.origin'() { this.updateSimilarRequests() },
+    'suggestion.destination'() { this.updateSimilarRequests() },
   },
   created() {
     this.geocoderPromise = VueGoogleMaps.loaded.then(() => {
@@ -264,6 +274,20 @@ var vue = new Vue({
       }, (error) => {
         $('#submitted-error-dialog').modal('show');
       })
+    },
+    updateSimilarRequests() {
+      if (this.suggestion.origin && this.suggestion.destination) {
+        this.$http.get('https://api.beeline.sg/suggestions/web/similar?' + querystring.stringify({
+          startLat: this.suggestion.origin.lat(),
+          startLng: this.suggestion.origin.lng(),
+          endLat: this.suggestion.destination.lat(),
+          endLng: this.suggestion.destination.lng(),
+          startDistance: 1000,
+          endDistance: 1000,
+        }))
+        .then(r => r.json())
+        .then(s => this.similarRequests.requests = s)
+      }
     },
     click(event) {
       if (this.focusAt) {

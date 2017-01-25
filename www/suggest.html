@@ -39,6 +39,14 @@
       padding-bottom: 0;
       overflow: hidden;
     }
+    .map-status-bar {
+      background: #CCC;
+      color: #000;
+      padding: 0.5em;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+    }
   </style>
 
   <!--JS-->
@@ -88,16 +96,24 @@
         <div class="col-lg-7 col-md-6 col-sm-12 col-xs-12">
           <gmap-map :center="center" :zoom="zoom"
               class="gmap"
-              @click="click" ref="map" :options="{
-            clickableIcons: false,
-            disableDefaultUi: true,
-          }">
+              @click="click" ref="map" :options="mapSettings.defaultMapOptions">
             <gmap-marker v-if="suggestion.origin" :position="suggestion.origin" label="S">
             </gmap-marker>
             <gmap-marker v-if="suggestion.destination" :position="suggestion.destination" label="E">
             </gmap-marker>
             <gmap-polyline v-if="path" :path="path">
             </gmap-polyline>
+            <similar-requests :requests="similarRequests.requests"
+              @hovered-on="similarRequests.hoveredRequest = $event">
+            </similar-requests>
+
+            <div slot="visible">
+              <div class="map-status-bar" v-show="similarRequests.hoveredRequest">
+                <template v-if="similarRequests.hoveredRequest">
+                  {{similarRequests.hoveredRequest.email || '(anonymous)'}}
+                </template>
+              </div>
+            </div>
           </gmap-map>
         </div>
         <!-- map ends -->
@@ -157,6 +173,21 @@
                 <i class="fa fa-info-circle"></i> <span class="small">Please enter a valid Singapore address.</span>
               </div>
             </transition>
+          </div>
+
+          <div class="form-group" v-if="suggestion.origin && suggestion.destination">
+            There are {{similarRequests.requests.length}} suggestion(s) similar to yours.
+
+            <transition name="expand">
+              <div v-show="similarRequests.requests.length > 0">
+                <requests-time-histogram :requests="similarRequests.requests"
+                  :width="320" :height="320">
+                </requests-time-histogram>
+              </div>
+            </transition>
+
+            <p>(Hint: once there are 15 similar suggestions, we can begin to
+            crowdstart a route!)</p>
           </div>
 
           <div class="form-group">
