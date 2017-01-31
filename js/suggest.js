@@ -357,6 +357,9 @@ var vue = new Vue({
     showEmail() {
       this.emailVerification = null;
       this.noVerification = true;
+    },
+    updatePlace(place) {
+      this.suggestion[this.focusAt] = place.geometry.location;
     }
   }
 })
