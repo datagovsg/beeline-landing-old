@@ -135,6 +135,7 @@ var vue = new Vue({
       destinationPlace: undefined,
       originText: '',
       destinationText: '',
+      referrer: null
     },
     arrivalTime: '',
     emailVerification: null,
@@ -247,7 +248,7 @@ var vue = new Vue({
       var splitTime = this.arrivalTime.split(':')
       var time = splitTime[0] * 3600000 + splitTime[1] * 60000;
 
-      this.$http.post('https://api.beeline.sg/suggestions/web', {
+      var suggestionData = {
         time: time,
         boardLat: this.suggestion.origin.lat(),
         boardLon: this.suggestion.origin.lng(),
@@ -255,7 +256,14 @@ var vue = new Vue({
         alightLon: this.suggestion.destination.lng(),
         email: this.email,
         emailVerification: this.emailVerification
-      })
+      };
+      if (this.suggestion.referrer) {
+        _.assign(suggestionData, {
+          referrer: this.suggestion.referrer
+        })
+      }
+
+      this.$http.post('https://api.beeline.sg/suggestions/web', suggestionData)
       .then((success) => {
         $('#submitted-dialog').modal('show')
           .on('hidden.bs.modal', () => {
@@ -269,7 +277,7 @@ var vue = new Vue({
         this.time = null;
         this.suggestion = {
           origin: null, destination: null, originPlace: null,
-          destinationPlace: null
+          destinationPlace: null, referrer:null
         };
       }, (error) => {
         $('#submitted-error-dialog').modal('show');
@@ -360,6 +368,9 @@ var vue = new Vue({
     },
     updatePlace(place) {
       this.suggestion[this.focusAt] = place.geometry.location;
+    },
+    setReferrer(referrer) {
+      this.suggestion.referrer = referrer;
     }
   }
 })
@@ -395,4 +406,8 @@ VueGoogleMaps.loaded.then(() => {
       }))
     }
   });
+
+  if(hash.referrer) {
+    vue.setReferrer(hash.referrer)
+  }
 })();
