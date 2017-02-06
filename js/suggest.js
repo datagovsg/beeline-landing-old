@@ -134,7 +134,8 @@ var vue = new Vue({
       destination: null,
       destinationPlace: undefined,
       originText: '',
-      destinationText: ''
+      destinationText: '',
+      referrer: null
     },
     arrivalTime: '',
     emailVerification: null,
@@ -247,14 +248,6 @@ var vue = new Vue({
       var splitTime = this.arrivalTime.split(':')
       var time = splitTime[0] * 3600000 + splitTime[1] * 60000;
 
-      var search = window.location.search;
-      var referrer = '';
-      if (search) {
-        search = search.substr(1);
-        search = querystring.parse(search);
-        referrer = search.referrer;
-      }
-
       var suggestionData = {
         time: time,
         boardLat: this.suggestion.origin.lat(),
@@ -264,10 +257,9 @@ var vue = new Vue({
         email: this.email,
         emailVerification: this.emailVerification
       };
-
-      if (referrer && referrer!=='') {
+      if (this.suggestion.referrer) {
         _.assign(suggestionData, {
-          referrer: referrer
+          referrer: this.suggestion.referrer
         })
       }
 
@@ -285,7 +277,7 @@ var vue = new Vue({
         this.time = null;
         this.suggestion = {
           origin: null, destination: null, originPlace: null,
-          destinationPlace: null
+          destinationPlace: null, referrer:null
         };
       }, (error) => {
         $('#submitted-error-dialog').modal('show');
@@ -376,6 +368,9 @@ var vue = new Vue({
     },
     updatePlace(place) {
       this.suggestion[this.focusAt] = place.geometry.location;
+    },
+    setReferrer(referrer) {
+      this.suggestion.referrer = referrer;
     }
   }
 })
@@ -411,4 +406,8 @@ VueGoogleMaps.loaded.then(() => {
       }))
     }
   });
+
+  if(hash.referrer) {
+    vue.setReferrer(hash.referrer)
+  }
 })();
