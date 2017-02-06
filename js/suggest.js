@@ -134,7 +134,7 @@ var vue = new Vue({
       destination: null,
       destinationPlace: undefined,
       originText: '',
-      destinationText: '',
+      destinationText: ''
     },
     arrivalTime: '',
     emailVerification: null,
@@ -247,7 +247,15 @@ var vue = new Vue({
       var splitTime = this.arrivalTime.split(':')
       var time = splitTime[0] * 3600000 + splitTime[1] * 60000;
 
-      this.$http.post('https://api.beeline.sg/suggestions/web', {
+      var search = window.location.search;
+      var referrer = '';
+      if (search) {
+        search = search.substr(1);
+        search = querystring.parse(search);
+        referrer = search.referrer;
+      }
+
+      var suggestionData = {
         time: time,
         boardLat: this.suggestion.origin.lat(),
         boardLon: this.suggestion.origin.lng(),
@@ -255,7 +263,15 @@ var vue = new Vue({
         alightLon: this.suggestion.destination.lng(),
         email: this.email,
         emailVerification: this.emailVerification
-      })
+      };
+
+      if (referrer && referrer!=='') {
+        _.assign(suggestionData, {
+          referrer: referrer
+        })
+      }
+
+      this.$http.post('https://api.beeline.sg/suggestions/web', suggestionData)
       .then((success) => {
         $('#submitted-dialog').modal('show')
           .on('hidden.bs.modal', () => {
