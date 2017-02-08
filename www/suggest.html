@@ -199,11 +199,14 @@
           <div class="form-group">
             <label class="control-label">
               Time at Destination
-              <my-validate
+              <!-- workaround for weird bug where the <select> option has
+                  to be selected twice -->
+              <!-- <my-validate
                 :required="true"
                 @validation-changed="validation.time = $event"
-              >
-                <select class="form-control" v-model="arrivalTime" @focus="zoomOut()">
+              > -->
+                <select class="form-control" v-model="arrivalTime"
+                  @focus="(validation.time.touched = true) && zoomOut()">
                   <option value="">Arrival Time at Destination</option>
                   <optgroup label="AM">
                     <option value="06:00">6:00 am</option>
@@ -226,10 +229,11 @@
                     <option value="8:30">8:30 pm</option>
                   </optgroup>
                 </select>
-              </my-validate>
+              <!-- </my-validate> -->
             </label>
             <transition name="expand">
-              <div class="alert alert-info" v-show="validation.time && validation.time.touched && !validation.time.valid">
+              <!-- <div class="alert alert-info" v-show="validation.time && validation.time.touched && !validation.time.valid"> -->
+              <div class="alert alert-info" v-show="validation.time.touched && !arrivalTime">
                 <i class="fa fa-info-circle"></i>
                 <span class="small">
                   Please select the time you want to arrive at your destination.

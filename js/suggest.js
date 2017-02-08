@@ -77,6 +77,9 @@ Vue.component('myValidate', {
       })
     }
   },
+  created() {
+    this.emit()
+  },
   computed: {
     finalValidationValue() {
       var value1 = this.validateValue;
@@ -168,7 +171,10 @@ var vue = new Vue({
     validation: {
       originValid: null,
       destinationValid: null,
-      time: null,
+      time: {
+        touched: false,
+        valid: false,
+      },
       agreeTerms: null,
       email: null,
     },
