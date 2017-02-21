@@ -8,14 +8,10 @@ in global, install the http-server
 
 <pre><code> $npm install http-server -g</code></pre>
 
-to serve, go to the "bee" folder and serve beeline-landing locally
+to serve:
 
 <pre><code>
-$ cd repo/bee/
-$ ls
-$ http-server beeline-landing/
+$ npm run start
 </code></pre>
 
 Use the address given to view
-
-npm run start
