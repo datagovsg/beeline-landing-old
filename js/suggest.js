@@ -185,6 +185,7 @@ var vue = new Vue({
       requests: [],
       hoveredRequest: null,
     },
+    runningRoutes: [],
     crowdstartedRoutes: [],
     validation: {
       originValid: null,
@@ -242,10 +243,12 @@ var vue = new Vue({
     },
     'suggestion.origin'() {
       this.updateSimilarRequests();
+      this.updateRunningRoutes();
       this.updateCrowdstartedRoutes();
     },
     'suggestion.destination'() {
       this.updateSimilarRequests();
+      this.updateRunningRoutes();
       this.updateCrowdstartedRoutes();
     },
   },
@@ -325,6 +328,30 @@ var vue = new Vue({
         }))
         .then(r => r.json())
         .then(s => this.similarRequests.requests = s)
+        .catch(err => console.error(err))
+      }
+    },
+    updateRunningRoutes() {
+      if (this.suggestion.origin && this.suggestion.destination) {
+        Vue.resource('https://api.beeline.sg/routes/search_by_latlon?' + querystring.stringify({
+            startLat: this.suggestion.origin.lat(),
+            startLng: this.suggestion.origin.lng(),
+            endLat: this.suggestion.destination.lat(),
+            endLng: this.suggestion.destination.lng(),
+            maxDistance: this.maxDistance,
+            tags: JSON.stringify(['public']),
+          })).get()
+          .then(r => r.json())
+          .then(rs => {
+            for (let route of rs) {
+              for (let trip of route.trips) {
+                trip.tripStops = _.sortBy(trip.tripStops, 'time');
+              }
+            }
+            rs.trips = _.sortBy(rs.trips, 'date');
+            this.runningRoutes = rs;
+          })
+          .catch(err => console.error(err));
       }
     },
     updateCrowdstartedRoutes() {
@@ -342,9 +369,9 @@ var vue = new Vue({
           )
         ))
         .then(filteredRoutes => {
-          console.log(filteredRoutes);
           this.crowdstartedRoutes = filteredRoutes;
         })
+        .catch(err => console.error(err))
       }
     },
     departureTimeFor(route) {
