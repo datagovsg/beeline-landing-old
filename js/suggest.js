@@ -3,7 +3,9 @@ const _ = require('lodash');
 const VueGoogleMaps = require('vue2-google-maps');
 const VueResource = require('vue-resource');
 const querystring = require('querystring');
+const moment = require('moment');
 const mapSettings = require('./mapSettings.js').default;
+const isWithinReach = require('./latlngDistance').isWithinReach;
 
 Vue.use(VueResource);
 Vue.use(VueGoogleMaps, {
@@ -102,6 +104,20 @@ Vue.component('myValidate', {
   },
 });
 
+var allCrowdstartedRoutes =
+  Vue.resource('https://api.beeline.sg/custom/lelong/status')
+     .get()
+     .then(r => r.json())
+     .then(rs => {
+       for (let route of rs) {
+         for (let trip of route.trips) {
+           trip.tripStops = _.sortBy(trip.tripStops, 'time')
+         }
+       }
+       rs.trips = _.sortBy(rs.trips, 'date')
+       return rs;
+     });
+
 const INIT = {
   zoom: 11,
   center: {lat: 1.38, lng: 103.8}
@@ -129,6 +145,7 @@ var vue = new Vue({
       ['14:00', '14:30'],
       ['15:00', '15:30'],
     ],
+    maxDistance: 1000,
     center: INIT.center,
     zoom: INIT.zoom,
     suggestion: {
@@ -168,6 +185,7 @@ var vue = new Vue({
       requests: [],
       hoveredRequest: null,
     },
+    crowdstartedRoutes: [],
     validation: {
       originValid: null,
       destinationValid: null,
@@ -222,8 +240,14 @@ var vue = new Vue({
         console.log(place);
       }
     },
-    'suggestion.origin'() { this.updateSimilarRequests() },
-    'suggestion.destination'() { this.updateSimilarRequests() },
+    'suggestion.origin'() {
+      this.updateSimilarRequests();
+      this.updateCrowdstartedRoutes();
+    },
+    'suggestion.destination'() {
+      this.updateSimilarRequests();
+      this.updateCrowdstartedRoutes();
+    },
   },
   created() {
     this.geocoderPromise = VueGoogleMaps.loaded.then(() => {
@@ -296,12 +320,40 @@ var vue = new Vue({
           startLng: this.suggestion.origin.lng(),
           endLat: this.suggestion.destination.lat(),
           endLng: this.suggestion.destination.lng(),
-          startDistance: 1000,
-          endDistance: 1000,
+          startDistance: this.maxDistance,
+          endDistance: this.maxDistance,
         }))
         .then(r => r.json())
         .then(s => this.similarRequests.requests = s)
       }
+    },
+    updateCrowdstartedRoutes() {
+      const origin = this.suggestion.origin;
+      const destination = this.suggestion.destination;
+      if (origin && destination) {
+        allCrowdstartedRoutes.then(routes => routes.filter(route =>
+          _.some(
+            route.trips[0].tripStops,
+            ts => ts.canBoard && isWithinReach(ts, origin, this.maxDistance)
+          ) &&
+          _.some(
+            route.trips[0].tripStops,
+            ts => ts.canAlight && isWithinReach(ts, destination, this.maxDistance)
+          )
+        ))
+        .then(filteredRoutes => {
+          console.log(filteredRoutes);
+          this.crowdstartedRoutes = filteredRoutes;
+        })
+      }
+    },
+    departureTimeFor(route) {
+      var tripStops = _.sortBy(route.trips[0].tripStops, ts => ts.time);
+      return moment(tripStops[0].time).utcOffset(480).format('hh:mm');
+    },
+    arrivalTimeFor(route) {
+      var tripStops = _.sortBy(route.trips[0].tripStops, ts => ts.time);
+      return moment(tripStops[tripStops.length-1].time).utcOffset(480).format('hh:mm');
     },
     click(event) {
       if (this.focusAt) {
