@@ -182,6 +182,19 @@
           </div>
 
           <div class="form-group" v-if="suggestion.origin && suggestion.destination">
+            {{crowdstartedRoutes.length}} routes similar to your suggestion are being crowdstarted!
+            <p class="small" v-for="route in crowdstartedRoutes">
+              <a target="new"
+                 :href="'https://app.beeline.sg/#/tabs/crowdstart/'+route.id+'/detail'">
+                ({{departureTimeFor(route)}}) {{route.from}}<br/>
+                ({{arrivalTimeFor(route)}}) {{route.to}}<br/>
+              </a>
+            </p>
+
+            <p>A route will go live once enough people back it!</p>
+          </div>
+
+          <div class="form-group" v-if="suggestion.origin && suggestion.destination">
             There are {{similarRequests.requests.length}} suggestion(s) similar to yours.
 
             <transition name="expand">
