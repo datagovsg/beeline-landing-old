@@ -181,6 +181,34 @@
             </transition>
           </div>
 
+          <div class="form-group"
+               v-if="suggestion.origin && suggestion.destination"
+               v-show="runningRoutes.length > 0">
+            {{runningRoutes.length}} routes running nearby! Book now!
+            <p class="small" v-for="route in runningRoutes">
+              <a target="new"
+                 :href="'https://app.beeline.sg/#/tabs/booking/'+route.id+'/stops'">
+                ({{departureTimeFor(route)}}) {{route.from}}<br/>
+                ({{arrivalTimeFor(route)}}) {{route.to}}<br/>
+              </a>
+            </p>
+          </div>
+
+          <div class="form-group"
+               v-if="suggestion.origin && suggestion.destination"
+               v-show="crowdstartedRoutes.length > 0">
+            {{crowdstartedRoutes.length}} routes similar to your suggestion are being crowdstarted!
+            <p class="small" v-for="route in crowdstartedRoutes">
+              <a target="new"
+                 :href="'https://app.beeline.sg/#/tabs/crowdstart/'+route.id+'/detail'">
+                ({{departureTimeFor(route)}}) {{route.from}}<br/>
+                ({{arrivalTimeFor(route)}}) {{route.to}}<br/>
+              </a>
+            </p>
+
+            <p>A route will go live once enough people back it!</p>
+          </div>
+
           <div class="form-group" v-if="suggestion.origin && suggestion.destination">
             There are {{similarRequests.requests.length}} suggestion(s) similar to yours.
 
