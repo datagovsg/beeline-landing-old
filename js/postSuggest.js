@@ -20,6 +20,6 @@ document.addEventListener('DOMContentLoaded', () => {
   })
 
   if (Clipboard) {
-    new Clipboard('.btn');
+    new Clipboard('.share-suggestion-button');
   }
 })

@@ -47,10 +47,6 @@ const suggestPack = {
         test: /\.scss/,
         loaders: ['style', 'css', 'sass'],
       },
-      {
-        test: /\.scss/,
-        loaders: ['style', 'css', 'sass'],
-      },
     ]
   },
   resolve: {
