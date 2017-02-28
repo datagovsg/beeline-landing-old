@@ -242,11 +242,13 @@ var vue = new Vue({
       }
     },
     'suggestion.origin'() {
+      this.updateHash();
       this.updateSimilarRequests();
       this.updateRunningRoutes();
       this.updateCrowdstartedRoutes();
     },
     'suggestion.destination'() {
+      this.updateHash();
       this.updateSimilarRequests();
       this.updateRunningRoutes();
       this.updateCrowdstartedRoutes();
@@ -373,6 +375,18 @@ var vue = new Vue({
         })
         .catch(err => console.error(err))
       }
+    },
+    updateHash() {
+      window.location.hash = querystring.stringify(_.assign({},
+        this.suggestion.origin ? {
+          originLat: this.suggestion.origin.lat(),
+          originLng: this.suggestion.origin.lng(),
+        } : {},
+        this.suggestion.destination ? {
+          destinationLat: this.suggestion.destination.lat(),
+          destinationLng: this.suggestion.destination.lng(),
+        } : {}
+      ))
     },
     departureTimeFor(route) {
       var tripStops = _.sortBy(route.trips[0].tripStops, ts => ts.time);
