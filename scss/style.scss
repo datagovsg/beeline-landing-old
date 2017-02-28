@@ -446,3 +446,10 @@ hr.suggest {
     margin-top: 30px;
   }
 }
+
+#share-link-section {
+  #suggestion-link {
+    width: calc(100% - 5em);
+    height: 4em;
+  }
+}
