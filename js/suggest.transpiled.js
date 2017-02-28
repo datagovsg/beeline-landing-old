@@ -7551,34 +7551,90 @@
 	        return doneResult();
 	      }
 
-	      context.method = method;
-	      context.arg = arg;
-
 	      while (true) {
 	        var delegate = context.delegate;
 	        if (delegate) {
-	          var delegateResult = maybeInvokeDelegate(delegate, context);
-	          if (delegateResult) {
-	            if (delegateResult === ContinueSentinel) continue;
-	            return delegateResult;
+	          if (method === "return" ||
+	              (method === "throw" && delegate.iterator[method] === undefined)) {
+	            // A return or throw (when the delegate iterator has no throw
+	            // method) always terminates the yield* loop.
+	            context.delegate = null;
+
+	            // If the delegate iterator has a return method, give it a
+	            // chance to clean up.
+	            var returnMethod = delegate.iterator["return"];
+	            if (returnMethod) {
+	              var record = tryCatch(returnMethod, delegate.iterator, arg);
+	              if (record.type === "throw") {
+	                // If the return method threw an exception, let that
+	                // exception prevail over the original return or throw.
+	                method = "throw";
+	                arg = record.arg;
+	                continue;
+	              }
+	            }
+
+	            if (method === "return") {
+	              // Continue with the outer return, now that the delegate
+	              // iterator has been terminated.
+	              continue;
+	            }
 	          }
+
+	          var record = tryCatch(
+	            delegate.iterator[method],
+	            delegate.iterator,
+	            arg
+	          );
+
+	          if (record.type === "throw") {
+	            context.delegate = null;
+
+	            // Like returning generator.throw(uncaught), but without the
+	            // overhead of an extra function call.
+	            method = "throw";
+	            arg = record.arg;
+	            continue;
+	          }
+
+	          // Delegate generator ran and handled its own exceptions so
+	          // regardless of what the method was, we continue as if it is
+	          // "next" with an undefined arg.
+	          method = "next";
+	          arg = undefined;
+
+	          var info = record.arg;
+	          if (info.done) {
+	            context[delegate.resultName] = info.value;
+	            context.next = delegate.nextLoc;
+	          } else {
+	            state = GenStateSuspendedYield;
+	            return info;
+	          }
+
+	          context.delegate = null;
 	        }
 
-	        if (context.method === "next") {
+	        if (method === "next") {
 	          // Setting context._sent for legacy support of Babel's
 	          // function.sent implementation.
-	          context.sent = context._sent = context.arg;
+	          context.sent = context._sent = arg;
 
-	        } else if (context.method === "throw") {
+	        } else if (method === "throw") {
 	          if (state === GenStateSuspendedStart) {
 	            state = GenStateCompleted;
-	            throw context.arg;
+	            throw arg;
 	          }
 
-	          context.dispatchException(context.arg);
+	          if (context.dispatchException(arg)) {
+	            // If the dispatched exception was caught by a catch block,
+	            // then let that catch block handle the exception normally.
+	            method = "next";
+	            arg = undefined;
+	          }
 
-	        } else if (context.method === "return") {
-	          context.abrupt("return", context.arg);
+	        } else if (method === "return") {
+	          context.abrupt("return", arg);
 	        }
 
 	        state = GenStateExecuting;
@@ -7591,106 +7647,30 @@
 	            ? GenStateCompleted
 	            : GenStateSuspendedYield;
 
-	          if (record.arg === ContinueSentinel) {
-	            continue;
-	          }
-
-	          return {
+	          var info = {
 	            value: record.arg,
 	            done: context.done
 	          };
 
+	          if (record.arg === ContinueSentinel) {
+	            if (context.delegate && method === "next") {
+	              // Deliberately forget the last sent value so that we don't
+	              // accidentally pass it on to the delegate.
+	              arg = undefined;
+	            }
+	          } else {
+	            return info;
+	          }
+
 	        } else if (record.type === "throw") {
 	          state = GenStateCompleted;
 	          // Dispatch the exception by looping back around to the
-	          // context.dispatchException(context.arg) call above.
-	          context.method = "throw";
-	          context.arg = record.arg;
+	          // context.dispatchException(arg) call above.
+	          method = "throw";
+	          arg = record.arg;
 	        }
 	      }
 	    };
-	  }
-
-	  // Call delegate.iterator[context.method](context.arg) and handle the
-	  // result, either by returning a { value, done } result from the
-	  // delegate iterator, or by modifying context.method and context.arg,
-	  // setting context.delegate to null, and returning the ContinueSentinel.
-	  function maybeInvokeDelegate(delegate, context) {
-	    var method = delegate.iterator[context.method];
-	    if (method === undefined) {
-	      // A .throw or .return when the delegate iterator has no .throw
-	      // method always terminates the yield* loop.
-	      context.delegate = null;
-
-	      if (context.method === "throw") {
-	        if (delegate.iterator.return) {
-	          // If the delegate iterator has a return method, give it a
-	          // chance to clean up.
-	          context.method = "return";
-	          context.arg = undefined;
-	          maybeInvokeDelegate(delegate, context);
-
-	          if (context.method === "throw") {
-	            // If maybeInvokeDelegate(context) changed context.method from
-	            // "return" to "throw", let that override the TypeError below.
-	            return ContinueSentinel;
-	          }
-	        }
-
-	        context.method = "throw";
-	        context.arg = new TypeError(
-	          "The iterator does not provide a 'throw' method");
-	      }
-
-	      return ContinueSentinel;
-	    }
-
-	    var record = tryCatch(method, delegate.iterator, context.arg);
-
-	    if (record.type === "throw") {
-	      context.method = "throw";
-	      context.arg = record.arg;
-	      context.delegate = null;
-	      return ContinueSentinel;
-	    }
-
-	    var info = record.arg;
-
-	    if (! info) {
-	      context.method = "throw";
-	      context.arg = new TypeError("iterator result is not an object");
-	      context.delegate = null;
-	      return ContinueSentinel;
-	    }
-
-	    if (info.done) {
-	      // Assign the result of the finished delegate to the temporary
-	      // variable specified by delegate.resultName (see delegateYield).
-	      context[delegate.resultName] = info.value;
-
-	      // Resume execution at the desired location (see delegateYield).
-	      context.next = delegate.nextLoc;
-
-	      // If context.method was "throw" but the delegate handled the
-	      // exception, let the outer generator proceed normally. If
-	      // context.method was "next", forget context.arg since it has been
-	      // "consumed" by the delegate iterator. If context.method was
-	      // "return", allow the original .return call to continue in the
-	      // outer generator.
-	      if (context.method !== "return") {
-	        context.method = "next";
-	        context.arg = undefined;
-	      }
-
-	    } else {
-	      // Re-yield the result returned by the delegate method.
-	      return info;
-	    }
-
-	    // The delegate iterator is finished, so forget it and continue with
-	    // the outer generator.
-	    context.delegate = null;
-	    return ContinueSentinel;
 	  }
 
 	  // Define Generator.prototype.{next,throw,return} in terms of the
@@ -7813,9 +7793,6 @@
 	      this.done = false;
 	      this.delegate = null;
 
-	      this.method = "next";
-	      this.arg = undefined;
-
 	      this.tryEntries.forEach(resetTryEntry);
 
 	      if (!skipTempReset) {
@@ -7852,15 +7829,7 @@
 	        record.type = "throw";
 	        record.arg = exception;
 	        context.next = loc;
-
-	        if (caught) {
-	          // If the dispatched exception was caught by a catch block,
-	          // then let that catch block handle the exception normally.
-	          context.method = "next";
-	          context.arg = undefined;
-	        }
-
-	        return !! caught;
+	        return !!caught;
 	      }
 
 	      for (var i = this.tryEntries.length - 1; i >= 0; --i) {
@@ -7928,12 +7897,12 @@
 	      record.arg = arg;
 
 	      if (finallyEntry) {
-	        this.method = "next";
 	        this.next = finallyEntry.finallyLoc;
-	        return ContinueSentinel;
+	      } else {
+	        this.complete(record);
 	      }
 
-	      return this.complete(record);
+	      return ContinueSentinel;
 	    },
 
 	    complete: function(record, afterLoc) {
@@ -7945,14 +7914,11 @@
 	          record.type === "continue") {
 	        this.next = record.arg;
 	      } else if (record.type === "return") {
-	        this.rval = this.arg = record.arg;
-	        this.method = "return";
+	        this.rval = record.arg;
 	        this.next = "end";
 	      } else if (record.type === "normal" && afterLoc) {
 	        this.next = afterLoc;
 	      }
-
-	      return ContinueSentinel;
 	    },
 
 	    finish: function(finallyLoc) {
@@ -7990,12 +7956,6 @@
 	        resultName: resultName,
 	        nextLoc: nextLoc
 	      };
-
-	      if (this.method === "next") {
-	        // Deliberately forget the last sent value so that we don't
-	        // accidentally pass it on to the delegate.
-	        this.arg = undefined;
-	      }
 
 	      return ContinueSentinel;
 	    }
@@ -8237,11 +8197,11 @@
 	var Vue = __webpack_require__(299);
 	var _ = __webpack_require__(300);
 	var VueGoogleMaps = __webpack_require__(302);
-	var VueResource = __webpack_require__(441);
-	var querystring = __webpack_require__(443);
-	var moment = __webpack_require__(446);
-	var mapSettings = __webpack_require__(556).default;
-	var isWithinReach = __webpack_require__(559).isWithinReach;
+	var VueResource = __webpack_require__(439);
+	var querystring = __webpack_require__(440);
+	var moment = __webpack_require__(443);
+	var mapSettings = __webpack_require__(553).default;
+	var isWithinReach = __webpack_require__(556).isWithinReach;
 
 	Vue.use(VueResource);
 	Vue.use(VueGoogleMaps, {
@@ -8268,8 +8228,8 @@
 	  }
 	});
 
-	Vue.component('similarRequests', __webpack_require__(560));
-	Vue.component('requestsTimeHistogram', __webpack_require__(563));
+	Vue.component('similarRequests', __webpack_require__(557));
+	Vue.component('requestsTimeHistogram', __webpack_require__(560));
 	Vue.component('myValidate', {
 	  props: ['validateRule', 'required', 'validateValue'],
 	  data: function data() {
@@ -8504,11 +8464,13 @@
 	      }
 	    },
 	    'suggestion.origin': function suggestionOrigin() {
+	      this.updateHash();
 	      this.updateSimilarRequests();
 	      this.updateRunningRoutes();
 	      this.updateCrowdstartedRoutes();
 	    },
 	    'suggestion.destination': function suggestionDestination() {
+	      this.updateHash();
 	      this.updateSimilarRequests();
 	      this.updateRunningRoutes();
 	      this.updateCrowdstartedRoutes();
@@ -8564,11 +8526,13 @@
 	      }
 
 	      this.$http.post('https://api.beeline.sg/suggestions/web', suggestionData).then(function (success) {
+	        var hash = _this3.getHash();
+
 	        $('#submitted-dialog').modal('show').on('hidden.bs.modal', function () {
 	          if (_this3.emailVerification) {
-	            window.location.href = "suggestSubmitted.html";
+	            window.location.href = "suggestSubmitted.html#" + hash;
 	          } else {
-	            window.location.href = "suggestVerify.html";
+	            window.location.href = "suggestVerify.html#" + hash;
 	          }
 	        });
 
@@ -8689,6 +8653,18 @@
 	          return console.error(err);
 	        });
 	      }
+	    },
+	    updateHash: function updateHash() {
+	      window.location.hash = this.getHash();
+	    },
+	    getHash: function getHash() {
+	      return querystring.stringify(_.assign({}, this.suggestion.origin ? {
+	        originLat: this.suggestion.origin.lat(),
+	        originLng: this.suggestion.origin.lng()
+	      } : {}, this.suggestion.destination ? {
+	        destinationLat: this.suggestion.destination.lat(),
+	        destinationLng: this.suggestion.destination.lng()
+	      } : {}));
 	    },
 	    departureTimeFor: function departureTimeFor(route) {
 	      var tripStops = _.sortBy(route.trips[0].tripStops, function (ts) {
@@ -8822,8 +8798,8 @@
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(global) {/*!
-	 * Vue.js v2.1.10
-	 * (c) 2014-2017 Evan You
+	 * Vue.js v2.1.8
+	 * (c) 2014-2016 Evan You
 	 * Released under the MIT License.
 	 */
 	(function (global, factory) {
@@ -8850,8 +8826,8 @@
 	 * If the conversion fails, return original string.
 	 */
 	function toNumber (val) {
-	  var n = parseFloat(val);
-	  return isNaN(n) ? val : n
+	  var n = parseFloat(val, 10);
+	  return (n || n === 0) ? n : val
 	}
 
 	/**
@@ -8916,7 +8892,7 @@
 	}
 
 	/**
-	 * Camelize a hyphen-delimited string.
+	 * Camelize a hyphen-delmited string.
 	 */
 	var camelizeRE = /-(\w)/g;
 	var camelize = cached(function (str) {
@@ -10326,1268 +10302,6 @@
 
 	/*  */
 
-	var VNode = function VNode (
-	  tag,
-	  data,
-	  children,
-	  text,
-	  elm,
-	  context,
-	  componentOptions
-	) {
-	  this.tag = tag;
-	  this.data = data;
-	  this.children = children;
-	  this.text = text;
-	  this.elm = elm;
-	  this.ns = undefined;
-	  this.context = context;
-	  this.functionalContext = undefined;
-	  this.key = data && data.key;
-	  this.componentOptions = componentOptions;
-	  this.componentInstance = undefined;
-	  this.parent = undefined;
-	  this.raw = false;
-	  this.isStatic = false;
-	  this.isRootInsert = true;
-	  this.isComment = false;
-	  this.isCloned = false;
-	  this.isOnce = false;
-	};
-
-	var prototypeAccessors = { child: {} };
-
-	// DEPRECATED: alias for componentInstance for backwards compat.
-	/* istanbul ignore next */
-	prototypeAccessors.child.get = function () {
-	  return this.componentInstance
-	};
-
-	Object.defineProperties( VNode.prototype, prototypeAccessors );
-
-	var createEmptyVNode = function () {
-	  var node = new VNode();
-	  node.text = '';
-	  node.isComment = true;
-	  return node
-	};
-
-	function createTextVNode (val) {
-	  return new VNode(undefined, undefined, undefined, String(val))
-	}
-
-	// optimized shallow clone
-	// used for static nodes and slot nodes because they may be reused across
-	// multiple renders, cloning them avoids errors when DOM manipulations rely
-	// on their elm reference.
-	function cloneVNode (vnode) {
-	  var cloned = new VNode(
-	    vnode.tag,
-	    vnode.data,
-	    vnode.children,
-	    vnode.text,
-	    vnode.elm,
-	    vnode.context,
-	    vnode.componentOptions
-	  );
-	  cloned.ns = vnode.ns;
-	  cloned.isStatic = vnode.isStatic;
-	  cloned.key = vnode.key;
-	  cloned.isCloned = true;
-	  return cloned
-	}
-
-	function cloneVNodes (vnodes) {
-	  var res = new Array(vnodes.length);
-	  for (var i = 0; i < vnodes.length; i++) {
-	    res[i] = cloneVNode(vnodes[i]);
-	  }
-	  return res
-	}
-
-	/*  */
-
-	var hooks = { init: init, prepatch: prepatch, insert: insert, destroy: destroy$1 };
-	var hooksToMerge = Object.keys(hooks);
-
-	function createComponent (
-	  Ctor,
-	  data,
-	  context,
-	  children,
-	  tag
-	) {
-	  if (!Ctor) {
-	    return
-	  }
-
-	  var baseCtor = context.$options._base;
-	  if (isObject(Ctor)) {
-	    Ctor = baseCtor.extend(Ctor);
-	  }
-
-	  if (typeof Ctor !== 'function') {
-	    {
-	      warn(("Invalid Component definition: " + (String(Ctor))), context);
-	    }
-	    return
-	  }
-
-	  // async component
-	  if (!Ctor.cid) {
-	    if (Ctor.resolved) {
-	      Ctor = Ctor.resolved;
-	    } else {
-	      Ctor = resolveAsyncComponent(Ctor, baseCtor, function () {
-	        // it's ok to queue this on every render because
-	        // $forceUpdate is buffered by the scheduler.
-	        context.$forceUpdate();
-	      });
-	      if (!Ctor) {
-	        // return nothing if this is indeed an async component
-	        // wait for the callback to trigger parent update.
-	        return
-	      }
-	    }
-	  }
-
-	  // resolve constructor options in case global mixins are applied after
-	  // component constructor creation
-	  resolveConstructorOptions(Ctor);
-
-	  data = data || {};
-
-	  // extract props
-	  var propsData = extractProps(data, Ctor);
-
-	  // functional component
-	  if (Ctor.options.functional) {
-	    return createFunctionalComponent(Ctor, propsData, data, context, children)
-	  }
-
-	  // extract listeners, since these needs to be treated as
-	  // child component listeners instead of DOM listeners
-	  var listeners = data.on;
-	  // replace with listeners with .native modifier
-	  data.on = data.nativeOn;
-
-	  if (Ctor.options.abstract) {
-	    // abstract components do not keep anything
-	    // other than props & listeners
-	    data = {};
-	  }
-
-	  // merge component management hooks onto the placeholder node
-	  mergeHooks(data);
-
-	  // return a placeholder vnode
-	  var name = Ctor.options.name || tag;
-	  var vnode = new VNode(
-	    ("vue-component-" + (Ctor.cid) + (name ? ("-" + name) : '')),
-	    data, undefined, undefined, undefined, context,
-	    { Ctor: Ctor, propsData: propsData, listeners: listeners, tag: tag, children: children }
-	  );
-	  return vnode
-	}
-
-	function createFunctionalComponent (
-	  Ctor,
-	  propsData,
-	  data,
-	  context,
-	  children
-	) {
-	  var props = {};
-	  var propOptions = Ctor.options.props;
-	  if (propOptions) {
-	    for (var key in propOptions) {
-	      props[key] = validateProp(key, propOptions, propsData);
-	    }
-	  }
-	  // ensure the createElement function in functional components
-	  // gets a unique context - this is necessary for correct named slot check
-	  var _context = Object.create(context);
-	  var h = function (a, b, c, d) { return createElement(_context, a, b, c, d, true); };
-	  var vnode = Ctor.options.render.call(null, h, {
-	    props: props,
-	    data: data,
-	    parent: context,
-	    children: children,
-	    slots: function () { return resolveSlots(children, context); }
-	  });
-	  if (vnode instanceof VNode) {
-	    vnode.functionalContext = context;
-	    if (data.slot) {
-	      (vnode.data || (vnode.data = {})).slot = data.slot;
-	    }
-	  }
-	  return vnode
-	}
-
-	function createComponentInstanceForVnode (
-	  vnode, // we know it's MountedComponentVNode but flow doesn't
-	  parent, // activeInstance in lifecycle state
-	  parentElm,
-	  refElm
-	) {
-	  var vnodeComponentOptions = vnode.componentOptions;
-	  var options = {
-	    _isComponent: true,
-	    parent: parent,
-	    propsData: vnodeComponentOptions.propsData,
-	    _componentTag: vnodeComponentOptions.tag,
-	    _parentVnode: vnode,
-	    _parentListeners: vnodeComponentOptions.listeners,
-	    _renderChildren: vnodeComponentOptions.children,
-	    _parentElm: parentElm || null,
-	    _refElm: refElm || null
-	  };
-	  // check inline-template render functions
-	  var inlineTemplate = vnode.data.inlineTemplate;
-	  if (inlineTemplate) {
-	    options.render = inlineTemplate.render;
-	    options.staticRenderFns = inlineTemplate.staticRenderFns;
-	  }
-	  return new vnodeComponentOptions.Ctor(options)
-	}
-
-	function init (
-	  vnode,
-	  hydrating,
-	  parentElm,
-	  refElm
-	) {
-	  if (!vnode.componentInstance || vnode.componentInstance._isDestroyed) {
-	    var child = vnode.componentInstance = createComponentInstanceForVnode(
-	      vnode,
-	      activeInstance,
-	      parentElm,
-	      refElm
-	    );
-	    child.$mount(hydrating ? vnode.elm : undefined, hydrating);
-	  } else if (vnode.data.keepAlive) {
-	    // kept-alive components, treat as a patch
-	    var mountedNode = vnode; // work around flow
-	    prepatch(mountedNode, mountedNode);
-	  }
-	}
-
-	function prepatch (
-	  oldVnode,
-	  vnode
-	) {
-	  var options = vnode.componentOptions;
-	  var child = vnode.componentInstance = oldVnode.componentInstance;
-	  child._updateFromParent(
-	    options.propsData, // updated props
-	    options.listeners, // updated listeners
-	    vnode, // new parent vnode
-	    options.children // new children
-	  );
-	}
-
-	function insert (vnode) {
-	  if (!vnode.componentInstance._isMounted) {
-	    vnode.componentInstance._isMounted = true;
-	    callHook(vnode.componentInstance, 'mounted');
-	  }
-	  if (vnode.data.keepAlive) {
-	    vnode.componentInstance._inactive = false;
-	    callHook(vnode.componentInstance, 'activated');
-	  }
-	}
-
-	function destroy$1 (vnode) {
-	  if (!vnode.componentInstance._isDestroyed) {
-	    if (!vnode.data.keepAlive) {
-	      vnode.componentInstance.$destroy();
-	    } else {
-	      vnode.componentInstance._inactive = true;
-	      callHook(vnode.componentInstance, 'deactivated');
-	    }
-	  }
-	}
-
-	function resolveAsyncComponent (
-	  factory,
-	  baseCtor,
-	  cb
-	) {
-	  if (factory.requested) {
-	    // pool callbacks
-	    factory.pendingCallbacks.push(cb);
-	  } else {
-	    factory.requested = true;
-	    var cbs = factory.pendingCallbacks = [cb];
-	    var sync = true;
-
-	    var resolve = function (res) {
-	      if (isObject(res)) {
-	        res = baseCtor.extend(res);
-	      }
-	      // cache resolved
-	      factory.resolved = res;
-	      // invoke callbacks only if this is not a synchronous resolve
-	      // (async resolves are shimmed as synchronous during SSR)
-	      if (!sync) {
-	        for (var i = 0, l = cbs.length; i < l; i++) {
-	          cbs[i](res);
-	        }
-	      }
-	    };
-
-	    var reject = function (reason) {
-	      "development" !== 'production' && warn(
-	        "Failed to resolve async component: " + (String(factory)) +
-	        (reason ? ("\nReason: " + reason) : '')
-	      );
-	    };
-
-	    var res = factory(resolve, reject);
-
-	    // handle promise
-	    if (res && typeof res.then === 'function' && !factory.resolved) {
-	      res.then(resolve, reject);
-	    }
-
-	    sync = false;
-	    // return in case resolved synchronously
-	    return factory.resolved
-	  }
-	}
-
-	function extractProps (data, Ctor) {
-	  // we are only extracting raw values here.
-	  // validation and default values are handled in the child
-	  // component itself.
-	  var propOptions = Ctor.options.props;
-	  if (!propOptions) {
-	    return
-	  }
-	  var res = {};
-	  var attrs = data.attrs;
-	  var props = data.props;
-	  var domProps = data.domProps;
-	  if (attrs || props || domProps) {
-	    for (var key in propOptions) {
-	      var altKey = hyphenate(key);
-	      checkProp(res, props, key, altKey, true) ||
-	      checkProp(res, attrs, key, altKey) ||
-	      checkProp(res, domProps, key, altKey);
-	    }
-	  }
-	  return res
-	}
-
-	function checkProp (
-	  res,
-	  hash,
-	  key,
-	  altKey,
-	  preserve
-	) {
-	  if (hash) {
-	    if (hasOwn(hash, key)) {
-	      res[key] = hash[key];
-	      if (!preserve) {
-	        delete hash[key];
-	      }
-	      return true
-	    } else if (hasOwn(hash, altKey)) {
-	      res[key] = hash[altKey];
-	      if (!preserve) {
-	        delete hash[altKey];
-	      }
-	      return true
-	    }
-	  }
-	  return false
-	}
-
-	function mergeHooks (data) {
-	  if (!data.hook) {
-	    data.hook = {};
-	  }
-	  for (var i = 0; i < hooksToMerge.length; i++) {
-	    var key = hooksToMerge[i];
-	    var fromParent = data.hook[key];
-	    var ours = hooks[key];
-	    data.hook[key] = fromParent ? mergeHook$1(ours, fromParent) : ours;
-	  }
-	}
-
-	function mergeHook$1 (one, two) {
-	  return function (a, b, c, d) {
-	    one(a, b, c, d);
-	    two(a, b, c, d);
-	  }
-	}
-
-	/*  */
-
-	function mergeVNodeHook (def, hookKey, hook, key) {
-	  key = key + hookKey;
-	  var injectedHash = def.__injected || (def.__injected = {});
-	  if (!injectedHash[key]) {
-	    injectedHash[key] = true;
-	    var oldHook = def[hookKey];
-	    if (oldHook) {
-	      def[hookKey] = function () {
-	        oldHook.apply(this, arguments);
-	        hook.apply(this, arguments);
-	      };
-	    } else {
-	      def[hookKey] = hook;
-	    }
-	  }
-	}
-
-	/*  */
-
-	var normalizeEvent = cached(function (name) {
-	  var once = name.charAt(0) === '~'; // Prefixed last, checked first
-	  name = once ? name.slice(1) : name;
-	  var capture = name.charAt(0) === '!';
-	  name = capture ? name.slice(1) : name;
-	  return {
-	    name: name,
-	    once: once,
-	    capture: capture
-	  }
-	});
-
-	function createEventHandle (fn) {
-	  var handle = {
-	    fn: fn,
-	    invoker: function () {
-	      var arguments$1 = arguments;
-
-	      var fn = handle.fn;
-	      if (Array.isArray(fn)) {
-	        for (var i = 0; i < fn.length; i++) {
-	          fn[i].apply(null, arguments$1);
-	        }
-	      } else {
-	        fn.apply(null, arguments);
-	      }
-	    }
-	  };
-	  return handle
-	}
-
-	function updateListeners (
-	  on,
-	  oldOn,
-	  add,
-	  remove$$1,
-	  vm
-	) {
-	  var name, cur, old, event;
-	  for (name in on) {
-	    cur = on[name];
-	    old = oldOn[name];
-	    event = normalizeEvent(name);
-	    if (!cur) {
-	      "development" !== 'production' && warn(
-	        "Invalid handler for event \"" + (event.name) + "\": got " + String(cur),
-	        vm
-	      );
-	    } else if (!old) {
-	      if (!cur.invoker) {
-	        cur = on[name] = createEventHandle(cur);
-	      }
-	      add(event.name, cur.invoker, event.once, event.capture);
-	    } else if (cur !== old) {
-	      old.fn = cur;
-	      on[name] = old;
-	    }
-	  }
-	  for (name in oldOn) {
-	    if (!on[name]) {
-	      event = normalizeEvent(name);
-	      remove$$1(event.name, oldOn[name].invoker, event.capture);
-	    }
-	  }
-	}
-
-	/*  */
-
-	// The template compiler attempts to minimize the need for normalization by
-	// statically analyzing the template at compile time.
-	//
-	// For plain HTML markup, normalization can be completely skipped because the
-	// generated render function is guaranteed to return Array<VNode>. There are
-	// two cases where extra normalization is needed:
-
-	// 1. When the children contains components - because a functional component
-	// may return an Array instead of a single root. In this case, just a simple
-	// nomralization is needed - if any child is an Array, we flatten the whole
-	// thing with Array.prototype.concat. It is guaranteed to be only 1-level deep
-	// because functional components already normalize their own children.
-	function simpleNormalizeChildren (children) {
-	  for (var i = 0; i < children.length; i++) {
-	    if (Array.isArray(children[i])) {
-	      return Array.prototype.concat.apply([], children)
-	    }
-	  }
-	  return children
-	}
-
-	// 2. When the children contains constrcuts that always generated nested Arrays,
-	// e.g. <template>, <slot>, v-for, or when the children is provided by user
-	// with hand-written render functions / JSX. In such cases a full normalization
-	// is needed to cater to all possible types of children values.
-	function normalizeChildren (children) {
-	  return isPrimitive(children)
-	    ? [createTextVNode(children)]
-	    : Array.isArray(children)
-	      ? normalizeArrayChildren(children)
-	      : undefined
-	}
-
-	function normalizeArrayChildren (children, nestedIndex) {
-	  var res = [];
-	  var i, c, last;
-	  for (i = 0; i < children.length; i++) {
-	    c = children[i];
-	    if (c == null || typeof c === 'boolean') { continue }
-	    last = res[res.length - 1];
-	    //  nested
-	    if (Array.isArray(c)) {
-	      res.push.apply(res, normalizeArrayChildren(c, ((nestedIndex || '') + "_" + i)));
-	    } else if (isPrimitive(c)) {
-	      if (last && last.text) {
-	        last.text += String(c);
-	      } else if (c !== '') {
-	        // convert primitive to vnode
-	        res.push(createTextVNode(c));
-	      }
-	    } else {
-	      if (c.text && last && last.text) {
-	        res[res.length - 1] = createTextVNode(last.text + c.text);
-	      } else {
-	        // default key for nested array children (likely generated by v-for)
-	        if (c.tag && c.key == null && nestedIndex != null) {
-	          c.key = "__vlist" + nestedIndex + "_" + i + "__";
-	        }
-	        res.push(c);
-	      }
-	    }
-	  }
-	  return res
-	}
-
-	/*  */
-
-	function getFirstComponentChild (children) {
-	  return children && children.filter(function (c) { return c && c.componentOptions; })[0]
-	}
-
-	/*  */
-
-	var SIMPLE_NORMALIZE = 1;
-	var ALWAYS_NORMALIZE = 2;
-
-	// wrapper function for providing a more flexible interface
-	// without getting yelled at by flow
-	function createElement (
-	  context,
-	  tag,
-	  data,
-	  children,
-	  normalizationType,
-	  alwaysNormalize
-	) {
-	  if (Array.isArray(data) || isPrimitive(data)) {
-	    normalizationType = children;
-	    children = data;
-	    data = undefined;
-	  }
-	  if (alwaysNormalize) { normalizationType = ALWAYS_NORMALIZE; }
-	  return _createElement(context, tag, data, children, normalizationType)
-	}
-
-	function _createElement (
-	  context,
-	  tag,
-	  data,
-	  children,
-	  normalizationType
-	) {
-	  if (data && data.__ob__) {
-	    "development" !== 'production' && warn(
-	      "Avoid using observed data object as vnode data: " + (JSON.stringify(data)) + "\n" +
-	      'Always create fresh vnode data objects in each render!',
-	      context
-	    );
-	    return createEmptyVNode()
-	  }
-	  if (!tag) {
-	    // in case of component :is set to falsy value
-	    return createEmptyVNode()
-	  }
-	  // support single function children as default scoped slot
-	  if (Array.isArray(children) &&
-	      typeof children[0] === 'function') {
-	    data = data || {};
-	    data.scopedSlots = { default: children[0] };
-	    children.length = 0;
-	  }
-	  if (normalizationType === ALWAYS_NORMALIZE) {
-	    children = normalizeChildren(children);
-	  } else if (normalizationType === SIMPLE_NORMALIZE) {
-	    children = simpleNormalizeChildren(children);
-	  }
-	  var vnode, ns;
-	  if (typeof tag === 'string') {
-	    var Ctor;
-	    ns = config.getTagNamespace(tag);
-	    if (config.isReservedTag(tag)) {
-	      // platform built-in elements
-	      vnode = new VNode(
-	        config.parsePlatformTagName(tag), data, children,
-	        undefined, undefined, context
-	      );
-	    } else if ((Ctor = resolveAsset(context.$options, 'components', tag))) {
-	      // component
-	      vnode = createComponent(Ctor, data, context, children, tag);
-	    } else {
-	      // unknown or unlisted namespaced elements
-	      // check at runtime because it may get assigned a namespace when its
-	      // parent normalizes children
-	      vnode = new VNode(
-	        tag, data, children,
-	        undefined, undefined, context
-	      );
-	    }
-	  } else {
-	    // direct component options / constructor
-	    vnode = createComponent(tag, data, context, children);
-	  }
-	  if (vnode) {
-	    if (ns) { applyNS(vnode, ns); }
-	    return vnode
-	  } else {
-	    return createEmptyVNode()
-	  }
-	}
-
-	function applyNS (vnode, ns) {
-	  vnode.ns = ns;
-	  if (vnode.tag === 'foreignObject') {
-	    // use default namespace inside foreignObject
-	    return
-	  }
-	  if (vnode.children) {
-	    for (var i = 0, l = vnode.children.length; i < l; i++) {
-	      var child = vnode.children[i];
-	      if (child.tag && !child.ns) {
-	        applyNS(child, ns);
-	      }
-	    }
-	  }
-	}
-
-	/*  */
-
-	function initRender (vm) {
-	  vm.$vnode = null; // the placeholder node in parent tree
-	  vm._vnode = null; // the root of the child tree
-	  vm._staticTrees = null;
-	  var parentVnode = vm.$options._parentVnode;
-	  var renderContext = parentVnode && parentVnode.context;
-	  vm.$slots = resolveSlots(vm.$options._renderChildren, renderContext);
-	  vm.$scopedSlots = {};
-	  // bind the createElement fn to this instance
-	  // so that we get proper render context inside it.
-	  // args order: tag, data, children, normalizationType, alwaysNormalize
-	  // internal version is used by render functions compiled from templates
-	  vm._c = function (a, b, c, d) { return createElement(vm, a, b, c, d, false); };
-	  // normalization is always applied for the public version, used in
-	  // user-written render functions.
-	  vm.$createElement = function (a, b, c, d) { return createElement(vm, a, b, c, d, true); };
-	}
-
-	function renderMixin (Vue) {
-	  Vue.prototype.$nextTick = function (fn) {
-	    return nextTick(fn, this)
-	  };
-
-	  Vue.prototype._render = function () {
-	    var vm = this;
-	    var ref = vm.$options;
-	    var render = ref.render;
-	    var staticRenderFns = ref.staticRenderFns;
-	    var _parentVnode = ref._parentVnode;
-
-	    if (vm._isMounted) {
-	      // clone slot nodes on re-renders
-	      for (var key in vm.$slots) {
-	        vm.$slots[key] = cloneVNodes(vm.$slots[key]);
-	      }
-	    }
-
-	    if (_parentVnode && _parentVnode.data.scopedSlots) {
-	      vm.$scopedSlots = _parentVnode.data.scopedSlots;
-	    }
-
-	    if (staticRenderFns && !vm._staticTrees) {
-	      vm._staticTrees = [];
-	    }
-	    // set parent vnode. this allows render functions to have access
-	    // to the data on the placeholder node.
-	    vm.$vnode = _parentVnode;
-	    // render self
-	    var vnode;
-	    try {
-	      vnode = render.call(vm._renderProxy, vm.$createElement);
-	    } catch (e) {
-	      /* istanbul ignore else */
-	      if (config.errorHandler) {
-	        config.errorHandler.call(null, e, vm);
-	      } else {
-	        {
-	          warn(("Error when rendering " + (formatComponentName(vm)) + ":"));
-	        }
-	        throw e
-	      }
-	      // return previous vnode to prevent render error causing blank component
-	      vnode = vm._vnode;
-	    }
-	    // return empty vnode in case the render function errored out
-	    if (!(vnode instanceof VNode)) {
-	      if ("development" !== 'production' && Array.isArray(vnode)) {
-	        warn(
-	          'Multiple root nodes returned from render function. Render function ' +
-	          'should return a single root node.',
-	          vm
-	        );
-	      }
-	      vnode = createEmptyVNode();
-	    }
-	    // set parent
-	    vnode.parent = _parentVnode;
-	    return vnode
-	  };
-
-	  // toString for mustaches
-	  Vue.prototype._s = _toString;
-	  // convert text to vnode
-	  Vue.prototype._v = createTextVNode;
-	  // number conversion
-	  Vue.prototype._n = toNumber;
-	  // empty vnode
-	  Vue.prototype._e = createEmptyVNode;
-	  // loose equal
-	  Vue.prototype._q = looseEqual;
-	  // loose indexOf
-	  Vue.prototype._i = looseIndexOf;
-
-	  // render static tree by index
-	  Vue.prototype._m = function renderStatic (
-	    index,
-	    isInFor
-	  ) {
-	    var tree = this._staticTrees[index];
-	    // if has already-rendered static tree and not inside v-for,
-	    // we can reuse the same tree by doing a shallow clone.
-	    if (tree && !isInFor) {
-	      return Array.isArray(tree)
-	        ? cloneVNodes(tree)
-	        : cloneVNode(tree)
-	    }
-	    // otherwise, render a fresh tree.
-	    tree = this._staticTrees[index] = this.$options.staticRenderFns[index].call(this._renderProxy);
-	    markStatic(tree, ("__static__" + index), false);
-	    return tree
-	  };
-
-	  // mark node as static (v-once)
-	  Vue.prototype._o = function markOnce (
-	    tree,
-	    index,
-	    key
-	  ) {
-	    markStatic(tree, ("__once__" + index + (key ? ("_" + key) : "")), true);
-	    return tree
-	  };
-
-	  function markStatic (tree, key, isOnce) {
-	    if (Array.isArray(tree)) {
-	      for (var i = 0; i < tree.length; i++) {
-	        if (tree[i] && typeof tree[i] !== 'string') {
-	          markStaticNode(tree[i], (key + "_" + i), isOnce);
-	        }
-	      }
-	    } else {
-	      markStaticNode(tree, key, isOnce);
-	    }
-	  }
-
-	  function markStaticNode (node, key, isOnce) {
-	    node.isStatic = true;
-	    node.key = key;
-	    node.isOnce = isOnce;
-	  }
-
-	  // filter resolution helper
-	  Vue.prototype._f = function resolveFilter (id) {
-	    return resolveAsset(this.$options, 'filters', id, true) || identity
-	  };
-
-	  // render v-for
-	  Vue.prototype._l = function renderList (
-	    val,
-	    render
-	  ) {
-	    var ret, i, l, keys, key;
-	    if (Array.isArray(val) || typeof val === 'string') {
-	      ret = new Array(val.length);
-	      for (i = 0, l = val.length; i < l; i++) {
-	        ret[i] = render(val[i], i);
-	      }
-	    } else if (typeof val === 'number') {
-	      ret = new Array(val);
-	      for (i = 0; i < val; i++) {
-	        ret[i] = render(i + 1, i);
-	      }
-	    } else if (isObject(val)) {
-	      keys = Object.keys(val);
-	      ret = new Array(keys.length);
-	      for (i = 0, l = keys.length; i < l; i++) {
-	        key = keys[i];
-	        ret[i] = render(val[key], key, i);
-	      }
-	    }
-	    return ret
-	  };
-
-	  // renderSlot
-	  Vue.prototype._t = function (
-	    name,
-	    fallback,
-	    props,
-	    bindObject
-	  ) {
-	    var scopedSlotFn = this.$scopedSlots[name];
-	    if (scopedSlotFn) { // scoped slot
-	      props = props || {};
-	      if (bindObject) {
-	        extend(props, bindObject);
-	      }
-	      return scopedSlotFn(props) || fallback
-	    } else {
-	      var slotNodes = this.$slots[name];
-	      // warn duplicate slot usage
-	      if (slotNodes && "development" !== 'production') {
-	        slotNodes._rendered && warn(
-	          "Duplicate presence of slot \"" + name + "\" found in the same render tree " +
-	          "- this will likely cause render errors.",
-	          this
-	        );
-	        slotNodes._rendered = true;
-	      }
-	      return slotNodes || fallback
-	    }
-	  };
-
-	  // apply v-bind object
-	  Vue.prototype._b = function bindProps (
-	    data,
-	    tag,
-	    value,
-	    asProp
-	  ) {
-	    if (value) {
-	      if (!isObject(value)) {
-	        "development" !== 'production' && warn(
-	          'v-bind without argument expects an Object or Array value',
-	          this
-	        );
-	      } else {
-	        if (Array.isArray(value)) {
-	          value = toObject(value);
-	        }
-	        for (var key in value) {
-	          if (key === 'class' || key === 'style') {
-	            data[key] = value[key];
-	          } else {
-	            var type = data.attrs && data.attrs.type;
-	            var hash = asProp || config.mustUseProp(tag, type, key)
-	              ? data.domProps || (data.domProps = {})
-	              : data.attrs || (data.attrs = {});
-	            hash[key] = value[key];
-	          }
-	        }
-	      }
-	    }
-	    return data
-	  };
-
-	  // check v-on keyCodes
-	  Vue.prototype._k = function checkKeyCodes (
-	    eventKeyCode,
-	    key,
-	    builtInAlias
-	  ) {
-	    var keyCodes = config.keyCodes[key] || builtInAlias;
-	    if (Array.isArray(keyCodes)) {
-	      return keyCodes.indexOf(eventKeyCode) === -1
-	    } else {
-	      return keyCodes !== eventKeyCode
-	    }
-	  };
-	}
-
-	function resolveSlots (
-	  children,
-	  context
-	) {
-	  var slots = {};
-	  if (!children) {
-	    return slots
-	  }
-	  var defaultSlot = [];
-	  var name, child;
-	  for (var i = 0, l = children.length; i < l; i++) {
-	    child = children[i];
-	    // named slots should only be respected if the vnode was rendered in the
-	    // same context.
-	    if ((child.context === context || child.functionalContext === context) &&
-	        child.data && (name = child.data.slot)) {
-	      var slot = (slots[name] || (slots[name] = []));
-	      if (child.tag === 'template') {
-	        slot.push.apply(slot, child.children);
-	      } else {
-	        slot.push(child);
-	      }
-	    } else {
-	      defaultSlot.push(child);
-	    }
-	  }
-	  // ignore single whitespace
-	  if (defaultSlot.length && !(
-	    defaultSlot.length === 1 &&
-	    (defaultSlot[0].text === ' ' || defaultSlot[0].isComment)
-	  )) {
-	    slots.default = defaultSlot;
-	  }
-	  return slots
-	}
-
-	/*  */
-
-	function initEvents (vm) {
-	  vm._events = Object.create(null);
-	  vm._hasHookEvent = false;
-	  // init parent attached events
-	  var listeners = vm.$options._parentListeners;
-	  if (listeners) {
-	    updateComponentListeners(vm, listeners);
-	  }
-	}
-
-	var target;
-
-	function add$1 (event, fn, once) {
-	  if (once) {
-	    target.$once(event, fn);
-	  } else {
-	    target.$on(event, fn);
-	  }
-	}
-
-	function remove$2 (event, fn) {
-	  target.$off(event, fn);
-	}
-
-	function updateComponentListeners (
-	  vm,
-	  listeners,
-	  oldListeners
-	) {
-	  target = vm;
-	  updateListeners(listeners, oldListeners || {}, add$1, remove$2, vm);
-	}
-
-	function eventsMixin (Vue) {
-	  var hookRE = /^hook:/;
-	  Vue.prototype.$on = function (event, fn) {
-	    var vm = this;(vm._events[event] || (vm._events[event] = [])).push(fn);
-	    // optimize hook:event cost by using a boolean flag marked at registration
-	    // instead of a hash lookup
-	    if (hookRE.test(event)) {
-	      vm._hasHookEvent = true;
-	    }
-	    return vm
-	  };
-
-	  Vue.prototype.$once = function (event, fn) {
-	    var vm = this;
-	    function on () {
-	      vm.$off(event, on);
-	      fn.apply(vm, arguments);
-	    }
-	    on.fn = fn;
-	    vm.$on(event, on);
-	    return vm
-	  };
-
-	  Vue.prototype.$off = function (event, fn) {
-	    var vm = this;
-	    // all
-	    if (!arguments.length) {
-	      vm._events = Object.create(null);
-	      return vm
-	    }
-	    // specific event
-	    var cbs = vm._events[event];
-	    if (!cbs) {
-	      return vm
-	    }
-	    if (arguments.length === 1) {
-	      vm._events[event] = null;
-	      return vm
-	    }
-	    // specific handler
-	    var cb;
-	    var i = cbs.length;
-	    while (i--) {
-	      cb = cbs[i];
-	      if (cb === fn || cb.fn === fn) {
-	        cbs.splice(i, 1);
-	        break
-	      }
-	    }
-	    return vm
-	  };
-
-	  Vue.prototype.$emit = function (event) {
-	    var vm = this;
-	    var cbs = vm._events[event];
-	    if (cbs) {
-	      cbs = cbs.length > 1 ? toArray(cbs) : cbs;
-	      var args = toArray(arguments, 1);
-	      for (var i = 0, l = cbs.length; i < l; i++) {
-	        cbs[i].apply(vm, args);
-	      }
-	    }
-	    return vm
-	  };
-	}
-
-	/*  */
-
-	var activeInstance = null;
-
-	function initLifecycle (vm) {
-	  var options = vm.$options;
-
-	  // locate first non-abstract parent
-	  var parent = options.parent;
-	  if (parent && !options.abstract) {
-	    while (parent.$options.abstract && parent.$parent) {
-	      parent = parent.$parent;
-	    }
-	    parent.$children.push(vm);
-	  }
-
-	  vm.$parent = parent;
-	  vm.$root = parent ? parent.$root : vm;
-
-	  vm.$children = [];
-	  vm.$refs = {};
-
-	  vm._watcher = null;
-	  vm._inactive = false;
-	  vm._isMounted = false;
-	  vm._isDestroyed = false;
-	  vm._isBeingDestroyed = false;
-	}
-
-	function lifecycleMixin (Vue) {
-	  Vue.prototype._mount = function (
-	    el,
-	    hydrating
-	  ) {
-	    var vm = this;
-	    vm.$el = el;
-	    if (!vm.$options.render) {
-	      vm.$options.render = createEmptyVNode;
-	      {
-	        /* istanbul ignore if */
-	        if (vm.$options.template && vm.$options.template.charAt(0) !== '#') {
-	          warn(
-	            'You are using the runtime-only build of Vue where the template ' +
-	            'option is not available. Either pre-compile the templates into ' +
-	            'render functions, or use the compiler-included build.',
-	            vm
-	          );
-	        } else {
-	          warn(
-	            'Failed to mount component: template or render function not defined.',
-	            vm
-	          );
-	        }
-	      }
-	    }
-	    callHook(vm, 'beforeMount');
-	    vm._watcher = new Watcher(vm, function updateComponent () {
-	      vm._update(vm._render(), hydrating);
-	    }, noop);
-	    hydrating = false;
-	    // manually mounted instance, call mounted on self
-	    // mounted is called for render-created child components in its inserted hook
-	    if (vm.$vnode == null) {
-	      vm._isMounted = true;
-	      callHook(vm, 'mounted');
-	    }
-	    return vm
-	  };
-
-	  Vue.prototype._update = function (vnode, hydrating) {
-	    var vm = this;
-	    if (vm._isMounted) {
-	      callHook(vm, 'beforeUpdate');
-	    }
-	    var prevEl = vm.$el;
-	    var prevVnode = vm._vnode;
-	    var prevActiveInstance = activeInstance;
-	    activeInstance = vm;
-	    vm._vnode = vnode;
-	    // Vue.prototype.__patch__ is injected in entry points
-	    // based on the rendering backend used.
-	    if (!prevVnode) {
-	      // initial render
-	      vm.$el = vm.__patch__(
-	        vm.$el, vnode, hydrating, false /* removeOnly */,
-	        vm.$options._parentElm,
-	        vm.$options._refElm
-	      );
-	    } else {
-	      // updates
-	      vm.$el = vm.__patch__(prevVnode, vnode);
-	    }
-	    activeInstance = prevActiveInstance;
-	    // update __vue__ reference
-	    if (prevEl) {
-	      prevEl.__vue__ = null;
-	    }
-	    if (vm.$el) {
-	      vm.$el.__vue__ = vm;
-	    }
-	    // if parent is an HOC, update its $el as well
-	    if (vm.$vnode && vm.$parent && vm.$vnode === vm.$parent._vnode) {
-	      vm.$parent.$el = vm.$el;
-	    }
-	    // updated hook is called by the scheduler to ensure that children are
-	    // updated in a parent's updated hook.
-	  };
-
-	  Vue.prototype._updateFromParent = function (
-	    propsData,
-	    listeners,
-	    parentVnode,
-	    renderChildren
-	  ) {
-	    var vm = this;
-	    var hasChildren = !!(vm.$options._renderChildren || renderChildren);
-	    vm.$options._parentVnode = parentVnode;
-	    vm.$vnode = parentVnode; // update vm's placeholder node without re-render
-	    if (vm._vnode) { // update child tree's parent
-	      vm._vnode.parent = parentVnode;
-	    }
-	    vm.$options._renderChildren = renderChildren;
-	    // update props
-	    if (propsData && vm.$options.props) {
-	      observerState.shouldConvert = false;
-	      {
-	        observerState.isSettingProps = true;
-	      }
-	      var propKeys = vm.$options._propKeys || [];
-	      for (var i = 0; i < propKeys.length; i++) {
-	        var key = propKeys[i];
-	        vm[key] = validateProp(key, vm.$options.props, propsData, vm);
-	      }
-	      observerState.shouldConvert = true;
-	      {
-	        observerState.isSettingProps = false;
-	      }
-	      vm.$options.propsData = propsData;
-	    }
-	    // update listeners
-	    if (listeners) {
-	      var oldListeners = vm.$options._parentListeners;
-	      vm.$options._parentListeners = listeners;
-	      updateComponentListeners(vm, listeners, oldListeners);
-	    }
-	    // resolve slots + force update if has children
-	    if (hasChildren) {
-	      vm.$slots = resolveSlots(renderChildren, parentVnode.context);
-	      vm.$forceUpdate();
-	    }
-	  };
-
-	  Vue.prototype.$forceUpdate = function () {
-	    var vm = this;
-	    if (vm._watcher) {
-	      vm._watcher.update();
-	    }
-	  };
-
-	  Vue.prototype.$destroy = function () {
-	    var vm = this;
-	    if (vm._isBeingDestroyed) {
-	      return
-	    }
-	    callHook(vm, 'beforeDestroy');
-	    vm._isBeingDestroyed = true;
-	    // remove self from parent
-	    var parent = vm.$parent;
-	    if (parent && !parent._isBeingDestroyed && !vm.$options.abstract) {
-	      remove$1(parent.$children, vm);
-	    }
-	    // teardown watchers
-	    if (vm._watcher) {
-	      vm._watcher.teardown();
-	    }
-	    var i = vm._watchers.length;
-	    while (i--) {
-	      vm._watchers[i].teardown();
-	    }
-	    // remove reference from data ob
-	    // frozen object may not have observer.
-	    if (vm._data.__ob__) {
-	      vm._data.__ob__.vmCount--;
-	    }
-	    // call the last hook...
-	    vm._isDestroyed = true;
-	    callHook(vm, 'destroyed');
-	    // turn off all instance listeners.
-	    vm.$off();
-	    // remove __vue__ reference
-	    if (vm.$el) {
-	      vm.$el.__vue__ = null;
-	    }
-	    // invoke destroy hooks on current rendered tree
-	    vm.__patch__(vm._vnode, null);
-	  };
-	}
-
-	function callHook (vm, hook) {
-	  var handlers = vm.$options[hook];
-	  if (handlers) {
-	    for (var i = 0, j = handlers.length; i < j; i++) {
-	      handlers[i].call(vm);
-	    }
-	  }
-	  if (vm._hasHookEvent) {
-	    vm.$emit('hook:' + hook);
-	  }
-	}
-
-	/*  */
-
 
 	var queue = [];
 	var has$1 = {};
@@ -11613,7 +10327,6 @@
 	 */
 	function flushSchedulerQueue () {
 	  flushing = true;
-	  var watcher, id, vm;
 
 	  // Sort queue before flush.
 	  // This ensures that:
@@ -11628,8 +10341,8 @@
 	  // do not cache length because more watchers might be pushed
 	  // as we run existing watchers
 	  for (index = 0; index < queue.length; index++) {
-	    watcher = queue[index];
-	    id = watcher.id;
+	    var watcher = queue[index];
+	    var id = watcher.id;
 	    has$1[id] = null;
 	    watcher.run();
 	    // in dev build, check and stop circular updates.
@@ -11646,16 +10359,6 @@
 	        );
 	        break
 	      }
-	    }
-	  }
-
-	  // call updated hooks
-	  index = queue.length;
-	  while (index--) {
-	    watcher = queue[index];
-	    vm = watcher.vm;
-	    if (vm._watcher === watcher && vm._isMounted) {
-	      callHook(vm, 'updated');
 	    }
 	  }
 
@@ -12164,6 +10867,1267 @@
 
 	/*  */
 
+	var VNode = function VNode (
+	  tag,
+	  data,
+	  children,
+	  text,
+	  elm,
+	  context,
+	  componentOptions
+	) {
+	  this.tag = tag;
+	  this.data = data;
+	  this.children = children;
+	  this.text = text;
+	  this.elm = elm;
+	  this.ns = undefined;
+	  this.context = context;
+	  this.functionalContext = undefined;
+	  this.key = data && data.key;
+	  this.componentOptions = componentOptions;
+	  this.child = undefined;
+	  this.parent = undefined;
+	  this.raw = false;
+	  this.isStatic = false;
+	  this.isRootInsert = true;
+	  this.isComment = false;
+	  this.isCloned = false;
+	  this.isOnce = false;
+	};
+
+	var createEmptyVNode = function () {
+	  var node = new VNode();
+	  node.text = '';
+	  node.isComment = true;
+	  return node
+	};
+
+	function createTextVNode (val) {
+	  return new VNode(undefined, undefined, undefined, String(val))
+	}
+
+	// optimized shallow clone
+	// used for static nodes and slot nodes because they may be reused across
+	// multiple renders, cloning them avoids errors when DOM manipulations rely
+	// on their elm reference.
+	function cloneVNode (vnode) {
+	  var cloned = new VNode(
+	    vnode.tag,
+	    vnode.data,
+	    vnode.children,
+	    vnode.text,
+	    vnode.elm,
+	    vnode.context,
+	    vnode.componentOptions
+	  );
+	  cloned.ns = vnode.ns;
+	  cloned.isStatic = vnode.isStatic;
+	  cloned.key = vnode.key;
+	  cloned.isCloned = true;
+	  return cloned
+	}
+
+	function cloneVNodes (vnodes) {
+	  var res = new Array(vnodes.length);
+	  for (var i = 0; i < vnodes.length; i++) {
+	    res[i] = cloneVNode(vnodes[i]);
+	  }
+	  return res
+	}
+
+	/*  */
+
+	function mergeVNodeHook (def, hookKey, hook, key) {
+	  key = key + hookKey;
+	  var injectedHash = def.__injected || (def.__injected = {});
+	  if (!injectedHash[key]) {
+	    injectedHash[key] = true;
+	    var oldHook = def[hookKey];
+	    if (oldHook) {
+	      def[hookKey] = function () {
+	        oldHook.apply(this, arguments);
+	        hook.apply(this, arguments);
+	      };
+	    } else {
+	      def[hookKey] = hook;
+	    }
+	  }
+	}
+
+	/*  */
+
+	function updateListeners (
+	  on,
+	  oldOn,
+	  add,
+	  remove$$1,
+	  vm
+	) {
+	  var name, cur, old, fn, event, capture, once;
+	  for (name in on) {
+	    cur = on[name];
+	    old = oldOn[name];
+	    if (!cur) {
+	      "development" !== 'production' && warn(
+	        "Invalid handler for event \"" + name + "\": got " + String(cur),
+	        vm
+	      );
+	    } else if (!old) {
+	      once = name.charAt(0) === '~'; // Prefixed last, checked first
+	      event = once ? name.slice(1) : name;
+	      capture = event.charAt(0) === '!';
+	      event = capture ? event.slice(1) : event;
+	      if (Array.isArray(cur)) {
+	        add(event, (cur.invoker = arrInvoker(cur)), once, capture);
+	      } else {
+	        if (!cur.invoker) {
+	          fn = cur;
+	          cur = on[name] = {};
+	          cur.fn = fn;
+	          cur.invoker = fnInvoker(cur);
+	        }
+	        add(event, cur.invoker, once, capture);
+	      }
+	    } else if (cur !== old) {
+	      if (Array.isArray(old)) {
+	        old.length = cur.length;
+	        for (var i = 0; i < old.length; i++) { old[i] = cur[i]; }
+	        on[name] = old;
+	      } else {
+	        old.fn = cur;
+	        on[name] = old;
+	      }
+	    }
+	  }
+	  for (name in oldOn) {
+	    if (!on[name]) {
+	      once = name.charAt(0) === '~'; // Prefixed last, checked first
+	      event = once ? name.slice(1) : name;
+	      capture = event.charAt(0) === '!';
+	      event = capture ? event.slice(1) : event;
+	      remove$$1(event, oldOn[name].invoker, capture);
+	    }
+	  }
+	}
+
+	function arrInvoker (arr) {
+	  return function (ev) {
+	    var arguments$1 = arguments;
+
+	    var single = arguments.length === 1;
+	    for (var i = 0; i < arr.length; i++) {
+	      single ? arr[i](ev) : arr[i].apply(null, arguments$1);
+	    }
+	  }
+	}
+
+	function fnInvoker (o) {
+	  return function (ev) {
+	    var single = arguments.length === 1;
+	    single ? o.fn(ev) : o.fn.apply(null, arguments);
+	  }
+	}
+
+	/*  */
+
+	// The template compiler attempts to minimize the need for normalization by
+	// statically analyzing the template at compile time.
+	//
+	// For plain HTML markup, normalization can be completely skipped because the
+	// generated render function is guaranteed to return Array<VNode>. There are
+	// two cases where extra normalization is needed:
+
+	// 1. When the children contains components - because a functional component
+	// may return an Array instead of a single root. In this case, just a simple
+	// nomralization is needed - if any child is an Array, we flatten the whole
+	// thing with Array.prototype.concat. It is guaranteed to be only 1-level deep
+	// because functional components already normalize their own children.
+	function simpleNormalizeChildren (children) {
+	  for (var i = 0; i < children.length; i++) {
+	    if (Array.isArray(children[i])) {
+	      return Array.prototype.concat.apply([], children)
+	    }
+	  }
+	  return children
+	}
+
+	// 2. When the children contains constrcuts that always generated nested Arrays,
+	// e.g. <template>, <slot>, v-for, or when the children is provided by user
+	// with hand-written render functions / JSX. In such cases a full normalization
+	// is needed to cater to all possible types of children values.
+	function normalizeChildren (children) {
+	  return isPrimitive(children)
+	    ? [createTextVNode(children)]
+	    : Array.isArray(children)
+	      ? normalizeArrayChildren(children)
+	      : undefined
+	}
+
+	function normalizeArrayChildren (children, nestedIndex) {
+	  var res = [];
+	  var i, c, last;
+	  for (i = 0; i < children.length; i++) {
+	    c = children[i];
+	    if (c == null || typeof c === 'boolean') { continue }
+	    last = res[res.length - 1];
+	    //  nested
+	    if (Array.isArray(c)) {
+	      res.push.apply(res, normalizeArrayChildren(c, ((nestedIndex || '') + "_" + i)));
+	    } else if (isPrimitive(c)) {
+	      if (last && last.text) {
+	        last.text += String(c);
+	      } else if (c !== '') {
+	        // convert primitive to vnode
+	        res.push(createTextVNode(c));
+	      }
+	    } else {
+	      if (c.text && last && last.text) {
+	        res[res.length - 1] = createTextVNode(last.text + c.text);
+	      } else {
+	        // default key for nested array children (likely generated by v-for)
+	        if (c.tag && c.key == null && nestedIndex != null) {
+	          c.key = "__vlist" + nestedIndex + "_" + i + "__";
+	        }
+	        res.push(c);
+	      }
+	    }
+	  }
+	  return res
+	}
+
+	/*  */
+
+	function getFirstComponentChild (children) {
+	  return children && children.filter(function (c) { return c && c.componentOptions; })[0]
+	}
+
+	/*  */
+
+	function initEvents (vm) {
+	  vm._events = Object.create(null);
+	  vm._hasHookEvent = false;
+	  // init parent attached events
+	  var listeners = vm.$options._parentListeners;
+	  if (listeners) {
+	    updateComponentListeners(vm, listeners);
+	  }
+	}
+
+	var target;
+
+	function add$1 (event, fn, once) {
+	  if (once) {
+	    target.$once(event, fn);
+	  } else {
+	    target.$on(event, fn);
+	  }
+	}
+
+	function remove$2 (event, fn) {
+	  target.$off(event, fn);
+	}
+
+	function updateComponentListeners (
+	  vm,
+	  listeners,
+	  oldListeners
+	) {
+	  target = vm;
+	  updateListeners(listeners, oldListeners || {}, add$1, remove$2, vm);
+	}
+
+	function eventsMixin (Vue) {
+	  var hookRE = /^hook:/;
+	  Vue.prototype.$on = function (event, fn) {
+	    var vm = this;(vm._events[event] || (vm._events[event] = [])).push(fn);
+	    // optimize hook:event cost by using a boolean flag marked at registration
+	    // instead of a hash lookup
+	    if (hookRE.test(event)) {
+	      vm._hasHookEvent = true;
+	    }
+	    return vm
+	  };
+
+	  Vue.prototype.$once = function (event, fn) {
+	    var vm = this;
+	    function on () {
+	      vm.$off(event, on);
+	      fn.apply(vm, arguments);
+	    }
+	    on.fn = fn;
+	    vm.$on(event, on);
+	    return vm
+	  };
+
+	  Vue.prototype.$off = function (event, fn) {
+	    var vm = this;
+	    // all
+	    if (!arguments.length) {
+	      vm._events = Object.create(null);
+	      return vm
+	    }
+	    // specific event
+	    var cbs = vm._events[event];
+	    if (!cbs) {
+	      return vm
+	    }
+	    if (arguments.length === 1) {
+	      vm._events[event] = null;
+	      return vm
+	    }
+	    // specific handler
+	    var cb;
+	    var i = cbs.length;
+	    while (i--) {
+	      cb = cbs[i];
+	      if (cb === fn || cb.fn === fn) {
+	        cbs.splice(i, 1);
+	        break
+	      }
+	    }
+	    return vm
+	  };
+
+	  Vue.prototype.$emit = function (event) {
+	    var vm = this;
+	    var cbs = vm._events[event];
+	    if (cbs) {
+	      cbs = cbs.length > 1 ? toArray(cbs) : cbs;
+	      var args = toArray(arguments, 1);
+	      for (var i = 0, l = cbs.length; i < l; i++) {
+	        cbs[i].apply(vm, args);
+	      }
+	    }
+	    return vm
+	  };
+	}
+
+	/*  */
+
+	var activeInstance = null;
+
+	function initLifecycle (vm) {
+	  var options = vm.$options;
+
+	  // locate first non-abstract parent
+	  var parent = options.parent;
+	  if (parent && !options.abstract) {
+	    while (parent.$options.abstract && parent.$parent) {
+	      parent = parent.$parent;
+	    }
+	    parent.$children.push(vm);
+	  }
+
+	  vm.$parent = parent;
+	  vm.$root = parent ? parent.$root : vm;
+
+	  vm.$children = [];
+	  vm.$refs = {};
+
+	  vm._watcher = null;
+	  vm._inactive = false;
+	  vm._isMounted = false;
+	  vm._isDestroyed = false;
+	  vm._isBeingDestroyed = false;
+	}
+
+	function lifecycleMixin (Vue) {
+	  Vue.prototype._mount = function (
+	    el,
+	    hydrating
+	  ) {
+	    var vm = this;
+	    vm.$el = el;
+	    if (!vm.$options.render) {
+	      vm.$options.render = createEmptyVNode;
+	      {
+	        /* istanbul ignore if */
+	        if (vm.$options.template && vm.$options.template.charAt(0) !== '#') {
+	          warn(
+	            'You are using the runtime-only build of Vue where the template ' +
+	            'option is not available. Either pre-compile the templates into ' +
+	            'render functions, or use the compiler-included build.',
+	            vm
+	          );
+	        } else {
+	          warn(
+	            'Failed to mount component: template or render function not defined.',
+	            vm
+	          );
+	        }
+	      }
+	    }
+	    callHook(vm, 'beforeMount');
+	    vm._watcher = new Watcher(vm, function () {
+	      vm._update(vm._render(), hydrating);
+	    }, noop);
+	    hydrating = false;
+	    // manually mounted instance, call mounted on self
+	    // mounted is called for render-created child components in its inserted hook
+	    if (vm.$vnode == null) {
+	      vm._isMounted = true;
+	      callHook(vm, 'mounted');
+	    }
+	    return vm
+	  };
+
+	  Vue.prototype._update = function (vnode, hydrating) {
+	    var vm = this;
+	    if (vm._isMounted) {
+	      callHook(vm, 'beforeUpdate');
+	    }
+	    var prevEl = vm.$el;
+	    var prevVnode = vm._vnode;
+	    var prevActiveInstance = activeInstance;
+	    activeInstance = vm;
+	    vm._vnode = vnode;
+	    // Vue.prototype.__patch__ is injected in entry points
+	    // based on the rendering backend used.
+	    if (!prevVnode) {
+	      // initial render
+	      vm.$el = vm.__patch__(
+	        vm.$el, vnode, hydrating, false /* removeOnly */,
+	        vm.$options._parentElm,
+	        vm.$options._refElm
+	      );
+	    } else {
+	      // updates
+	      vm.$el = vm.__patch__(prevVnode, vnode);
+	    }
+	    activeInstance = prevActiveInstance;
+	    // update __vue__ reference
+	    if (prevEl) {
+	      prevEl.__vue__ = null;
+	    }
+	    if (vm.$el) {
+	      vm.$el.__vue__ = vm;
+	    }
+	    // if parent is an HOC, update its $el as well
+	    if (vm.$vnode && vm.$parent && vm.$vnode === vm.$parent._vnode) {
+	      vm.$parent.$el = vm.$el;
+	    }
+	    if (vm._isMounted) {
+	      callHook(vm, 'updated');
+	    }
+	  };
+
+	  Vue.prototype._updateFromParent = function (
+	    propsData,
+	    listeners,
+	    parentVnode,
+	    renderChildren
+	  ) {
+	    var vm = this;
+	    var hasChildren = !!(vm.$options._renderChildren || renderChildren);
+	    vm.$options._parentVnode = parentVnode;
+	    vm.$vnode = parentVnode; // update vm's placeholder node without re-render
+	    if (vm._vnode) { // update child tree's parent
+	      vm._vnode.parent = parentVnode;
+	    }
+	    vm.$options._renderChildren = renderChildren;
+	    // update props
+	    if (propsData && vm.$options.props) {
+	      observerState.shouldConvert = false;
+	      {
+	        observerState.isSettingProps = true;
+	      }
+	      var propKeys = vm.$options._propKeys || [];
+	      for (var i = 0; i < propKeys.length; i++) {
+	        var key = propKeys[i];
+	        vm[key] = validateProp(key, vm.$options.props, propsData, vm);
+	      }
+	      observerState.shouldConvert = true;
+	      {
+	        observerState.isSettingProps = false;
+	      }
+	      vm.$options.propsData = propsData;
+	    }
+	    // update listeners
+	    if (listeners) {
+	      var oldListeners = vm.$options._parentListeners;
+	      vm.$options._parentListeners = listeners;
+	      updateComponentListeners(vm, listeners, oldListeners);
+	    }
+	    // resolve slots + force update if has children
+	    if (hasChildren) {
+	      vm.$slots = resolveSlots(renderChildren, parentVnode.context);
+	      vm.$forceUpdate();
+	    }
+	  };
+
+	  Vue.prototype.$forceUpdate = function () {
+	    var vm = this;
+	    if (vm._watcher) {
+	      vm._watcher.update();
+	    }
+	  };
+
+	  Vue.prototype.$destroy = function () {
+	    var vm = this;
+	    if (vm._isBeingDestroyed) {
+	      return
+	    }
+	    callHook(vm, 'beforeDestroy');
+	    vm._isBeingDestroyed = true;
+	    // remove self from parent
+	    var parent = vm.$parent;
+	    if (parent && !parent._isBeingDestroyed && !vm.$options.abstract) {
+	      remove$1(parent.$children, vm);
+	    }
+	    // teardown watchers
+	    if (vm._watcher) {
+	      vm._watcher.teardown();
+	    }
+	    var i = vm._watchers.length;
+	    while (i--) {
+	      vm._watchers[i].teardown();
+	    }
+	    // remove reference from data ob
+	    // frozen object may not have observer.
+	    if (vm._data.__ob__) {
+	      vm._data.__ob__.vmCount--;
+	    }
+	    // call the last hook...
+	    vm._isDestroyed = true;
+	    callHook(vm, 'destroyed');
+	    // turn off all instance listeners.
+	    vm.$off();
+	    // remove __vue__ reference
+	    if (vm.$el) {
+	      vm.$el.__vue__ = null;
+	    }
+	    // invoke destroy hooks on current rendered tree
+	    vm.__patch__(vm._vnode, null);
+	  };
+	}
+
+	function callHook (vm, hook) {
+	  var handlers = vm.$options[hook];
+	  if (handlers) {
+	    for (var i = 0, j = handlers.length; i < j; i++) {
+	      handlers[i].call(vm);
+	    }
+	  }
+	  if (vm._hasHookEvent) {
+	    vm.$emit('hook:' + hook);
+	  }
+	}
+
+	/*  */
+
+	var hooks = { init: init, prepatch: prepatch, insert: insert, destroy: destroy$1 };
+	var hooksToMerge = Object.keys(hooks);
+
+	function createComponent (
+	  Ctor,
+	  data,
+	  context,
+	  children,
+	  tag
+	) {
+	  if (!Ctor) {
+	    return
+	  }
+
+	  var baseCtor = context.$options._base;
+	  if (isObject(Ctor)) {
+	    Ctor = baseCtor.extend(Ctor);
+	  }
+
+	  if (typeof Ctor !== 'function') {
+	    {
+	      warn(("Invalid Component definition: " + (String(Ctor))), context);
+	    }
+	    return
+	  }
+
+	  // async component
+	  if (!Ctor.cid) {
+	    if (Ctor.resolved) {
+	      Ctor = Ctor.resolved;
+	    } else {
+	      Ctor = resolveAsyncComponent(Ctor, baseCtor, function () {
+	        // it's ok to queue this on every render because
+	        // $forceUpdate is buffered by the scheduler.
+	        context.$forceUpdate();
+	      });
+	      if (!Ctor) {
+	        // return nothing if this is indeed an async component
+	        // wait for the callback to trigger parent update.
+	        return
+	      }
+	    }
+	  }
+
+	  // resolve constructor options in case global mixins are applied after
+	  // component constructor creation
+	  resolveConstructorOptions(Ctor);
+
+	  data = data || {};
+
+	  // extract props
+	  var propsData = extractProps(data, Ctor);
+
+	  // functional component
+	  if (Ctor.options.functional) {
+	    return createFunctionalComponent(Ctor, propsData, data, context, children)
+	  }
+
+	  // extract listeners, since these needs to be treated as
+	  // child component listeners instead of DOM listeners
+	  var listeners = data.on;
+	  // replace with listeners with .native modifier
+	  data.on = data.nativeOn;
+
+	  if (Ctor.options.abstract) {
+	    // abstract components do not keep anything
+	    // other than props & listeners
+	    data = {};
+	  }
+
+	  // merge component management hooks onto the placeholder node
+	  mergeHooks(data);
+
+	  // return a placeholder vnode
+	  var name = Ctor.options.name || tag;
+	  var vnode = new VNode(
+	    ("vue-component-" + (Ctor.cid) + (name ? ("-" + name) : '')),
+	    data, undefined, undefined, undefined, context,
+	    { Ctor: Ctor, propsData: propsData, listeners: listeners, tag: tag, children: children }
+	  );
+	  return vnode
+	}
+
+	function createFunctionalComponent (
+	  Ctor,
+	  propsData,
+	  data,
+	  context,
+	  children
+	) {
+	  var props = {};
+	  var propOptions = Ctor.options.props;
+	  if (propOptions) {
+	    for (var key in propOptions) {
+	      props[key] = validateProp(key, propOptions, propsData);
+	    }
+	  }
+	  // ensure the createElement function in functional components
+	  // gets a unique context - this is necessary for correct named slot check
+	  var _context = Object.create(context);
+	  var h = function (a, b, c, d) { return createElement(_context, a, b, c, d, true); };
+	  var vnode = Ctor.options.render.call(null, h, {
+	    props: props,
+	    data: data,
+	    parent: context,
+	    children: children,
+	    slots: function () { return resolveSlots(children, context); }
+	  });
+	  if (vnode instanceof VNode) {
+	    vnode.functionalContext = context;
+	    if (data.slot) {
+	      (vnode.data || (vnode.data = {})).slot = data.slot;
+	    }
+	  }
+	  return vnode
+	}
+
+	function createComponentInstanceForVnode (
+	  vnode, // we know it's MountedComponentVNode but flow doesn't
+	  parent, // activeInstance in lifecycle state
+	  parentElm,
+	  refElm
+	) {
+	  var vnodeComponentOptions = vnode.componentOptions;
+	  var options = {
+	    _isComponent: true,
+	    parent: parent,
+	    propsData: vnodeComponentOptions.propsData,
+	    _componentTag: vnodeComponentOptions.tag,
+	    _parentVnode: vnode,
+	    _parentListeners: vnodeComponentOptions.listeners,
+	    _renderChildren: vnodeComponentOptions.children,
+	    _parentElm: parentElm || null,
+	    _refElm: refElm || null
+	  };
+	  // check inline-template render functions
+	  var inlineTemplate = vnode.data.inlineTemplate;
+	  if (inlineTemplate) {
+	    options.render = inlineTemplate.render;
+	    options.staticRenderFns = inlineTemplate.staticRenderFns;
+	  }
+	  return new vnodeComponentOptions.Ctor(options)
+	}
+
+	function init (
+	  vnode,
+	  hydrating,
+	  parentElm,
+	  refElm
+	) {
+	  if (!vnode.child || vnode.child._isDestroyed) {
+	    var child = vnode.child = createComponentInstanceForVnode(
+	      vnode,
+	      activeInstance,
+	      parentElm,
+	      refElm
+	    );
+	    child.$mount(hydrating ? vnode.elm : undefined, hydrating);
+	  } else if (vnode.data.keepAlive) {
+	    // kept-alive components, treat as a patch
+	    var mountedNode = vnode; // work around flow
+	    prepatch(mountedNode, mountedNode);
+	  }
+	}
+
+	function prepatch (
+	  oldVnode,
+	  vnode
+	) {
+	  var options = vnode.componentOptions;
+	  var child = vnode.child = oldVnode.child;
+	  child._updateFromParent(
+	    options.propsData, // updated props
+	    options.listeners, // updated listeners
+	    vnode, // new parent vnode
+	    options.children // new children
+	  );
+	}
+
+	function insert (vnode) {
+	  if (!vnode.child._isMounted) {
+	    vnode.child._isMounted = true;
+	    callHook(vnode.child, 'mounted');
+	  }
+	  if (vnode.data.keepAlive) {
+	    vnode.child._inactive = false;
+	    callHook(vnode.child, 'activated');
+	  }
+	}
+
+	function destroy$1 (vnode) {
+	  if (!vnode.child._isDestroyed) {
+	    if (!vnode.data.keepAlive) {
+	      vnode.child.$destroy();
+	    } else {
+	      vnode.child._inactive = true;
+	      callHook(vnode.child, 'deactivated');
+	    }
+	  }
+	}
+
+	function resolveAsyncComponent (
+	  factory,
+	  baseCtor,
+	  cb
+	) {
+	  if (factory.requested) {
+	    // pool callbacks
+	    factory.pendingCallbacks.push(cb);
+	  } else {
+	    factory.requested = true;
+	    var cbs = factory.pendingCallbacks = [cb];
+	    var sync = true;
+
+	    var resolve = function (res) {
+	      if (isObject(res)) {
+	        res = baseCtor.extend(res);
+	      }
+	      // cache resolved
+	      factory.resolved = res;
+	      // invoke callbacks only if this is not a synchronous resolve
+	      // (async resolves are shimmed as synchronous during SSR)
+	      if (!sync) {
+	        for (var i = 0, l = cbs.length; i < l; i++) {
+	          cbs[i](res);
+	        }
+	      }
+	    };
+
+	    var reject = function (reason) {
+	      "development" !== 'production' && warn(
+	        "Failed to resolve async component: " + (String(factory)) +
+	        (reason ? ("\nReason: " + reason) : '')
+	      );
+	    };
+
+	    var res = factory(resolve, reject);
+
+	    // handle promise
+	    if (res && typeof res.then === 'function' && !factory.resolved) {
+	      res.then(resolve, reject);
+	    }
+
+	    sync = false;
+	    // return in case resolved synchronously
+	    return factory.resolved
+	  }
+	}
+
+	function extractProps (data, Ctor) {
+	  // we are only extracting raw values here.
+	  // validation and default values are handled in the child
+	  // component itself.
+	  var propOptions = Ctor.options.props;
+	  if (!propOptions) {
+	    return
+	  }
+	  var res = {};
+	  var attrs = data.attrs;
+	  var props = data.props;
+	  var domProps = data.domProps;
+	  if (attrs || props || domProps) {
+	    for (var key in propOptions) {
+	      var altKey = hyphenate(key);
+	      checkProp(res, props, key, altKey, true) ||
+	      checkProp(res, attrs, key, altKey) ||
+	      checkProp(res, domProps, key, altKey);
+	    }
+	  }
+	  return res
+	}
+
+	function checkProp (
+	  res,
+	  hash,
+	  key,
+	  altKey,
+	  preserve
+	) {
+	  if (hash) {
+	    if (hasOwn(hash, key)) {
+	      res[key] = hash[key];
+	      if (!preserve) {
+	        delete hash[key];
+	      }
+	      return true
+	    } else if (hasOwn(hash, altKey)) {
+	      res[key] = hash[altKey];
+	      if (!preserve) {
+	        delete hash[altKey];
+	      }
+	      return true
+	    }
+	  }
+	  return false
+	}
+
+	function mergeHooks (data) {
+	  if (!data.hook) {
+	    data.hook = {};
+	  }
+	  for (var i = 0; i < hooksToMerge.length; i++) {
+	    var key = hooksToMerge[i];
+	    var fromParent = data.hook[key];
+	    var ours = hooks[key];
+	    data.hook[key] = fromParent ? mergeHook$1(ours, fromParent) : ours;
+	  }
+	}
+
+	function mergeHook$1 (one, two) {
+	  return function (a, b, c, d) {
+	    one(a, b, c, d);
+	    two(a, b, c, d);
+	  }
+	}
+
+	/*  */
+
+	var SIMPLE_NORMALIZE = 1;
+	var ALWAYS_NORMALIZE = 2;
+
+	// wrapper function for providing a more flexible interface
+	// without getting yelled at by flow
+	function createElement (
+	  context,
+	  tag,
+	  data,
+	  children,
+	  normalizationType,
+	  alwaysNormalize
+	) {
+	  if (Array.isArray(data) || isPrimitive(data)) {
+	    normalizationType = children;
+	    children = data;
+	    data = undefined;
+	  }
+	  if (alwaysNormalize) { normalizationType = ALWAYS_NORMALIZE; }
+	  return _createElement(context, tag, data, children, normalizationType)
+	}
+
+	function _createElement (
+	  context,
+	  tag,
+	  data,
+	  children,
+	  normalizationType
+	) {
+	  if (data && data.__ob__) {
+	    "development" !== 'production' && warn(
+	      "Avoid using observed data object as vnode data: " + (JSON.stringify(data)) + "\n" +
+	      'Always create fresh vnode data objects in each render!',
+	      context
+	    );
+	    return createEmptyVNode()
+	  }
+	  if (!tag) {
+	    // in case of component :is set to falsy value
+	    return createEmptyVNode()
+	  }
+	  // support single function children as default scoped slot
+	  if (Array.isArray(children) &&
+	      typeof children[0] === 'function') {
+	    data = data || {};
+	    data.scopedSlots = { default: children[0] };
+	    children.length = 0;
+	  }
+	  if (normalizationType === ALWAYS_NORMALIZE) {
+	    children = normalizeChildren(children);
+	  } else if (normalizationType === SIMPLE_NORMALIZE) {
+	    children = simpleNormalizeChildren(children);
+	  }
+	  var vnode, ns;
+	  if (typeof tag === 'string') {
+	    var Ctor;
+	    ns = config.getTagNamespace(tag);
+	    if (config.isReservedTag(tag)) {
+	      // platform built-in elements
+	      vnode = new VNode(
+	        config.parsePlatformTagName(tag), data, children,
+	        undefined, undefined, context
+	      );
+	    } else if ((Ctor = resolveAsset(context.$options, 'components', tag))) {
+	      // component
+	      vnode = createComponent(Ctor, data, context, children, tag);
+	    } else {
+	      // unknown or unlisted namespaced elements
+	      // check at runtime because it may get assigned a namespace when its
+	      // parent normalizes children
+	      vnode = new VNode(
+	        tag, data, children,
+	        undefined, undefined, context
+	      );
+	    }
+	  } else {
+	    // direct component options / constructor
+	    vnode = createComponent(tag, data, context, children);
+	  }
+	  if (vnode) {
+	    if (ns) { applyNS(vnode, ns); }
+	    return vnode
+	  } else {
+	    return createEmptyVNode()
+	  }
+	}
+
+	function applyNS (vnode, ns) {
+	  vnode.ns = ns;
+	  if (vnode.tag === 'foreignObject') {
+	    // use default namespace inside foreignObject
+	    return
+	  }
+	  if (vnode.children) {
+	    for (var i = 0, l = vnode.children.length; i < l; i++) {
+	      var child = vnode.children[i];
+	      if (child.tag && !child.ns) {
+	        applyNS(child, ns);
+	      }
+	    }
+	  }
+	}
+
+	/*  */
+
+	function initRender (vm) {
+	  vm.$vnode = null; // the placeholder node in parent tree
+	  vm._vnode = null; // the root of the child tree
+	  vm._staticTrees = null;
+	  var parentVnode = vm.$options._parentVnode;
+	  var renderContext = parentVnode && parentVnode.context;
+	  vm.$slots = resolveSlots(vm.$options._renderChildren, renderContext);
+	  vm.$scopedSlots = {};
+	  // bind the createElement fn to this instance
+	  // so that we get proper render context inside it.
+	  // args order: tag, data, children, normalizationType, alwaysNormalize
+	  // internal version is used by render functions compiled from templates
+	  vm._c = function (a, b, c, d) { return createElement(vm, a, b, c, d, false); };
+	  // normalization is always applied for the public version, used in
+	  // user-written render functions.
+	  vm.$createElement = function (a, b, c, d) { return createElement(vm, a, b, c, d, true); };
+	  if (vm.$options.el) {
+	    vm.$mount(vm.$options.el);
+	  }
+	}
+
+	function renderMixin (Vue) {
+	  Vue.prototype.$nextTick = function (fn) {
+	    return nextTick(fn, this)
+	  };
+
+	  Vue.prototype._render = function () {
+	    var vm = this;
+	    var ref = vm.$options;
+	    var render = ref.render;
+	    var staticRenderFns = ref.staticRenderFns;
+	    var _parentVnode = ref._parentVnode;
+
+	    if (vm._isMounted) {
+	      // clone slot nodes on re-renders
+	      for (var key in vm.$slots) {
+	        vm.$slots[key] = cloneVNodes(vm.$slots[key]);
+	      }
+	    }
+
+	    if (_parentVnode && _parentVnode.data.scopedSlots) {
+	      vm.$scopedSlots = _parentVnode.data.scopedSlots;
+	    }
+
+	    if (staticRenderFns && !vm._staticTrees) {
+	      vm._staticTrees = [];
+	    }
+	    // set parent vnode. this allows render functions to have access
+	    // to the data on the placeholder node.
+	    vm.$vnode = _parentVnode;
+	    // render self
+	    var vnode;
+	    try {
+	      vnode = render.call(vm._renderProxy, vm.$createElement);
+	    } catch (e) {
+	      /* istanbul ignore else */
+	      if (config.errorHandler) {
+	        config.errorHandler.call(null, e, vm);
+	      } else {
+	        {
+	          warn(("Error when rendering " + (formatComponentName(vm)) + ":"));
+	        }
+	        throw e
+	      }
+	      // return previous vnode to prevent render error causing blank component
+	      vnode = vm._vnode;
+	    }
+	    // return empty vnode in case the render function errored out
+	    if (!(vnode instanceof VNode)) {
+	      if ("development" !== 'production' && Array.isArray(vnode)) {
+	        warn(
+	          'Multiple root nodes returned from render function. Render function ' +
+	          'should return a single root node.',
+	          vm
+	        );
+	      }
+	      vnode = createEmptyVNode();
+	    }
+	    // set parent
+	    vnode.parent = _parentVnode;
+	    return vnode
+	  };
+
+	  // toString for mustaches
+	  Vue.prototype._s = _toString;
+	  // convert text to vnode
+	  Vue.prototype._v = createTextVNode;
+	  // number conversion
+	  Vue.prototype._n = toNumber;
+	  // empty vnode
+	  Vue.prototype._e = createEmptyVNode;
+	  // loose equal
+	  Vue.prototype._q = looseEqual;
+	  // loose indexOf
+	  Vue.prototype._i = looseIndexOf;
+
+	  // render static tree by index
+	  Vue.prototype._m = function renderStatic (
+	    index,
+	    isInFor
+	  ) {
+	    var tree = this._staticTrees[index];
+	    // if has already-rendered static tree and not inside v-for,
+	    // we can reuse the same tree by doing a shallow clone.
+	    if (tree && !isInFor) {
+	      return Array.isArray(tree)
+	        ? cloneVNodes(tree)
+	        : cloneVNode(tree)
+	    }
+	    // otherwise, render a fresh tree.
+	    tree = this._staticTrees[index] = this.$options.staticRenderFns[index].call(this._renderProxy);
+	    markStatic(tree, ("__static__" + index), false);
+	    return tree
+	  };
+
+	  // mark node as static (v-once)
+	  Vue.prototype._o = function markOnce (
+	    tree,
+	    index,
+	    key
+	  ) {
+	    markStatic(tree, ("__once__" + index + (key ? ("_" + key) : "")), true);
+	    return tree
+	  };
+
+	  function markStatic (tree, key, isOnce) {
+	    if (Array.isArray(tree)) {
+	      for (var i = 0; i < tree.length; i++) {
+	        if (tree[i] && typeof tree[i] !== 'string') {
+	          markStaticNode(tree[i], (key + "_" + i), isOnce);
+	        }
+	      }
+	    } else {
+	      markStaticNode(tree, key, isOnce);
+	    }
+	  }
+
+	  function markStaticNode (node, key, isOnce) {
+	    node.isStatic = true;
+	    node.key = key;
+	    node.isOnce = isOnce;
+	  }
+
+	  // filter resolution helper
+	  Vue.prototype._f = function resolveFilter (id) {
+	    return resolveAsset(this.$options, 'filters', id, true) || identity
+	  };
+
+	  // render v-for
+	  Vue.prototype._l = function renderList (
+	    val,
+	    render
+	  ) {
+	    var ret, i, l, keys, key;
+	    if (Array.isArray(val) || typeof val === 'string') {
+	      ret = new Array(val.length);
+	      for (i = 0, l = val.length; i < l; i++) {
+	        ret[i] = render(val[i], i);
+	      }
+	    } else if (typeof val === 'number') {
+	      ret = new Array(val);
+	      for (i = 0; i < val; i++) {
+	        ret[i] = render(i + 1, i);
+	      }
+	    } else if (isObject(val)) {
+	      keys = Object.keys(val);
+	      ret = new Array(keys.length);
+	      for (i = 0, l = keys.length; i < l; i++) {
+	        key = keys[i];
+	        ret[i] = render(val[key], key, i);
+	      }
+	    }
+	    return ret
+	  };
+
+	  // renderSlot
+	  Vue.prototype._t = function (
+	    name,
+	    fallback,
+	    props,
+	    bindObject
+	  ) {
+	    var scopedSlotFn = this.$scopedSlots[name];
+	    if (scopedSlotFn) { // scoped slot
+	      props = props || {};
+	      if (bindObject) {
+	        extend(props, bindObject);
+	      }
+	      return scopedSlotFn(props) || fallback
+	    } else {
+	      var slotNodes = this.$slots[name];
+	      // warn duplicate slot usage
+	      if (slotNodes && "development" !== 'production') {
+	        slotNodes._rendered && warn(
+	          "Duplicate presence of slot \"" + name + "\" found in the same render tree " +
+	          "- this will likely cause render errors.",
+	          this
+	        );
+	        slotNodes._rendered = true;
+	      }
+	      return slotNodes || fallback
+	    }
+	  };
+
+	  // apply v-bind object
+	  Vue.prototype._b = function bindProps (
+	    data,
+	    tag,
+	    value,
+	    asProp
+	  ) {
+	    if (value) {
+	      if (!isObject(value)) {
+	        "development" !== 'production' && warn(
+	          'v-bind without argument expects an Object or Array value',
+	          this
+	        );
+	      } else {
+	        if (Array.isArray(value)) {
+	          value = toObject(value);
+	        }
+	        for (var key in value) {
+	          if (key === 'class' || key === 'style') {
+	            data[key] = value[key];
+	          } else {
+	            var hash = asProp || config.mustUseProp(tag, key)
+	              ? data.domProps || (data.domProps = {})
+	              : data.attrs || (data.attrs = {});
+	            hash[key] = value[key];
+	          }
+	        }
+	      }
+	    }
+	    return data
+	  };
+
+	  // check v-on keyCodes
+	  Vue.prototype._k = function checkKeyCodes (
+	    eventKeyCode,
+	    key,
+	    builtInAlias
+	  ) {
+	    var keyCodes = config.keyCodes[key] || builtInAlias;
+	    if (Array.isArray(keyCodes)) {
+	      return keyCodes.indexOf(eventKeyCode) === -1
+	    } else {
+	      return keyCodes !== eventKeyCode
+	    }
+	  };
+	}
+
+	function resolveSlots (
+	  children,
+	  context
+	) {
+	  var slots = {};
+	  if (!children) {
+	    return slots
+	  }
+	  var defaultSlot = [];
+	  var name, child;
+	  for (var i = 0, l = children.length; i < l; i++) {
+	    child = children[i];
+	    // named slots should only be respected if the vnode was rendered in the
+	    // same context.
+	    if ((child.context === context || child.functionalContext === context) &&
+	        child.data && (name = child.data.slot)) {
+	      var slot = (slots[name] || (slots[name] = []));
+	      if (child.tag === 'template') {
+	        slot.push.apply(slot, child.children);
+	      } else {
+	        slot.push(child);
+	      }
+	    } else {
+	      defaultSlot.push(child);
+	    }
+	  }
+	  // ignore single whitespace
+	  if (defaultSlot.length && !(
+	    defaultSlot.length === 1 &&
+	    (defaultSlot[0].text === ' ' || defaultSlot[0].isComment)
+	  )) {
+	    slots.default = defaultSlot;
+	  }
+	  return slots
+	}
+
+	/*  */
+
 	var uid = 0;
 
 	function initMixin (Vue) {
@@ -12194,13 +12158,10 @@
 	    vm._self = vm;
 	    initLifecycle(vm);
 	    initEvents(vm);
-	    initRender(vm);
 	    callHook(vm, 'beforeCreate');
 	    initState(vm);
 	    callHook(vm, 'created');
-	    if (vm.$options.el) {
-	      vm.$mount(vm.$options.el);
-	    }
+	    initRender(vm);
 	  };
 	}
 
@@ -12393,10 +12354,6 @@
 
 	var patternTypes = [String, RegExp];
 
-	function getComponentName (opts) {
-	  return opts && (opts.Ctor.options.name || opts.tag)
-	}
-
 	function matches (pattern, name) {
 	  if (typeof pattern === 'string') {
 	    return pattern.split(',').indexOf(name) > -1
@@ -12405,64 +12362,22 @@
 	  }
 	}
 
-	function pruneCache (cache, filter) {
-	  for (var key in cache) {
-	    var cachedNode = cache[key];
-	    if (cachedNode) {
-	      var name = getComponentName(cachedNode.componentOptions);
-	      if (name && !filter(name)) {
-	        pruneCacheEntry(cachedNode);
-	        cache[key] = null;
-	      }
-	    }
-	  }
-	}
-
-	function pruneCacheEntry (vnode) {
-	  if (vnode) {
-	    if (!vnode.componentInstance._inactive) {
-	      callHook(vnode.componentInstance, 'deactivated');
-	    }
-	    vnode.componentInstance.$destroy();
-	  }
-	}
-
 	var KeepAlive = {
 	  name: 'keep-alive',
 	  abstract: true,
-
 	  props: {
 	    include: patternTypes,
 	    exclude: patternTypes
 	  },
-
 	  created: function created () {
 	    this.cache = Object.create(null);
 	  },
-
-	  destroyed: function destroyed () {
-	    var this$1 = this;
-
-	    for (var key in this.cache) {
-	      pruneCacheEntry(this$1.cache[key]);
-	    }
-	  },
-
-	  watch: {
-	    include: function include (val) {
-	      pruneCache(this.cache, function (name) { return matches(val, name); });
-	    },
-	    exclude: function exclude (val) {
-	      pruneCache(this.cache, function (name) { return !matches(val, name); });
-	    }
-	  },
-
 	  render: function render () {
 	    var vnode = getFirstComponentChild(this.$slots.default);
-	    var componentOptions = vnode && vnode.componentOptions;
-	    if (componentOptions) {
+	    if (vnode && vnode.componentOptions) {
+	      var opts = vnode.componentOptions;
 	      // check pattern
-	      var name = getComponentName(componentOptions);
+	      var name = opts.Ctor.options.name || opts.tag;
 	      if (name && (
 	        (this.include && !matches(this.include, name)) ||
 	        (this.exclude && matches(this.exclude, name))
@@ -12472,16 +12387,25 @@
 	      var key = vnode.key == null
 	        // same constructor may get registered as different local components
 	        // so cid alone is not enough (#3269)
-	        ? componentOptions.Ctor.cid + (componentOptions.tag ? ("::" + (componentOptions.tag)) : '')
+	        ? opts.Ctor.cid + (opts.tag ? ("::" + (opts.tag)) : '')
 	        : vnode.key;
 	      if (this.cache[key]) {
-	        vnode.componentInstance = this.cache[key].componentInstance;
+	        vnode.child = this.cache[key].child;
 	      } else {
 	        this.cache[key] = vnode;
 	      }
 	      vnode.data.keepAlive = true;
 	    }
 	    return vnode
+	  },
+	  destroyed: function destroyed () {
+	    var this$1 = this;
+
+	    for (var key in this.cache) {
+	      var vnode = this$1.cache[key];
+	      callHook(vnode.child, 'deactivated');
+	      vnode.child.$destroy();
+	    }
 	  }
 	};
 
@@ -12531,15 +12455,15 @@
 	  get: isServerRendering
 	});
 
-	Vue$3.version = '2.1.10';
+	Vue$3.version = '2.1.8';
 
 	/*  */
 
 	// attributes that should be using props for binding
 	var acceptValue = makeMap('input,textarea,option,select');
-	var mustUseProp = function (tag, type, attr) {
+	var mustUseProp = function (tag, attr) {
 	  return (
-	    (attr === 'value' && acceptValue(tag)) && type !== 'button' ||
+	    (attr === 'value' && acceptValue(tag)) ||
 	    (attr === 'selected' && tag === 'option') ||
 	    (attr === 'checked' && tag === 'input') ||
 	    (attr === 'muted' && tag === 'video')
@@ -12577,8 +12501,8 @@
 	  var data = vnode.data;
 	  var parentNode = vnode;
 	  var childNode = vnode;
-	  while (childNode.componentInstance) {
-	    childNode = childNode.componentInstance._vnode;
+	  while (childNode.child) {
+	    childNode = childNode.child._vnode;
 	    if (childNode.data) {
 	      data = mergeClassData(childNode.data, data);
 	    }
@@ -12830,7 +12754,7 @@
 	  if (!key) { return }
 
 	  var vm = vnode.context;
-	  var ref = vnode.componentInstance || vnode.elm;
+	  var ref = vnode.child || vnode.elm;
 	  var refs = vm.$refs;
 	  if (isRemoval) {
 	    if (Array.isArray(refs[key])) {
@@ -12990,7 +12914,7 @@
 	  function createComponent (vnode, insertedVnodeQueue, parentElm, refElm) {
 	    var i = vnode.data;
 	    if (isDef(i)) {
-	      var isReactivated = isDef(vnode.componentInstance) && i.keepAlive;
+	      var isReactivated = isDef(vnode.child) && i.keepAlive;
 	      if (isDef(i = i.hook) && isDef(i = i.init)) {
 	        i(vnode, false /* hydrating */, parentElm, refElm);
 	      }
@@ -12998,30 +12922,13 @@
 	      // it should've created a child instance and mounted it. the child
 	      // component also has set the placeholder vnode's elm.
 	      // in that case we can just return the element and be done.
-	      if (isDef(vnode.componentInstance)) {
+	      if (isDef(vnode.child)) {
 	        initComponent(vnode, insertedVnodeQueue);
 	        if (isReactivated) {
 	          reactivateComponent(vnode, insertedVnodeQueue, parentElm, refElm);
 	        }
 	        return true
 	      }
-	    }
-	  }
-
-	  function initComponent (vnode, insertedVnodeQueue) {
-	    if (vnode.data.pendingInsert) {
-	      insertedVnodeQueue.push.apply(insertedVnodeQueue, vnode.data.pendingInsert);
-	    }
-	    vnode.elm = vnode.componentInstance.$el;
-	    if (isPatchable(vnode)) {
-	      invokeCreateHooks(vnode, insertedVnodeQueue);
-	      setScope(vnode);
-	    } else {
-	      // empty component root.
-	      // skip all element-related modules except for ref (#3455)
-	      registerRef(vnode);
-	      // make sure to invoke the insert hook
-	      insertedVnodeQueue.push(vnode);
 	    }
 	  }
 
@@ -13032,8 +12939,8 @@
 	    // again. It's not ideal to involve module-specific logic in here but
 	    // there doesn't seem to be a better way to do it.
 	    var innerNode = vnode;
-	    while (innerNode.componentInstance) {
-	      innerNode = innerNode.componentInstance._vnode;
+	    while (innerNode.child) {
+	      innerNode = innerNode.child._vnode;
 	      if (isDef(i = innerNode.data) && isDef(i = i.transition)) {
 	        for (i = 0; i < cbs.activate.length; ++i) {
 	          cbs.activate[i](emptyNode, innerNode);
@@ -13068,8 +12975,8 @@
 	  }
 
 	  function isPatchable (vnode) {
-	    while (vnode.componentInstance) {
-	      vnode = vnode.componentInstance._vnode;
+	    while (vnode.child) {
+	      vnode = vnode.child._vnode;
 	    }
 	    return isDef(vnode.tag)
 	  }
@@ -13082,6 +12989,23 @@
 	    if (isDef(i)) {
 	      if (i.create) { i.create(emptyNode, vnode); }
 	      if (i.insert) { insertedVnodeQueue.push(vnode); }
+	    }
+	  }
+
+	  function initComponent (vnode, insertedVnodeQueue) {
+	    if (vnode.data.pendingInsert) {
+	      insertedVnodeQueue.push.apply(insertedVnodeQueue, vnode.data.pendingInsert);
+	    }
+	    vnode.elm = vnode.child.$el;
+	    if (isPatchable(vnode)) {
+	      invokeCreateHooks(vnode, insertedVnodeQueue);
+	      setScope(vnode);
+	    } else {
+	      // empty component root.
+	      // skip all element-related modules except for ref (#3455)
+	      registerRef(vnode);
+	      // make sure to invoke the insert hook
+	      insertedVnodeQueue.push(vnode);
 	    }
 	  }
 
@@ -13146,7 +13070,7 @@
 	        rm.listeners += listeners;
 	      }
 	      // recursively invoke hooks on child component root node
-	      if (isDef(i = vnode.componentInstance) && isDef(i = i._vnode) && isDef(i.data)) {
+	      if (isDef(i = vnode.child) && isDef(i = i._vnode) && isDef(i.data)) {
 	        removeAndInvokeRemoveHook(i, rm);
 	      }
 	      for (i = 0; i < cbs.remove.length; ++i) {
@@ -13250,7 +13174,7 @@
 	        vnode.key === oldVnode.key &&
 	        (vnode.isCloned || vnode.isOnce)) {
 	      vnode.elm = oldVnode.elm;
-	      vnode.componentInstance = oldVnode.componentInstance;
+	      vnode.child = oldVnode.child;
 	      return
 	    }
 	    var i;
@@ -13315,7 +13239,7 @@
 	    var children = vnode.children;
 	    if (isDef(data)) {
 	      if (isDef(i = data.hook) && isDef(i = i.init)) { i(vnode, true /* hydrating */); }
-	      if (isDef(i = vnode.componentInstance)) {
+	      if (isDef(i = vnode.child)) {
 	        // child component. it should have hydrated its own tree.
 	        initComponent(vnode, insertedVnodeQueue);
 	        return true
@@ -13381,6 +13305,7 @@
 	      return
 	    }
 
+	    var elm, parent;
 	    var isInitialPatch = false;
 	    var insertedVnodeQueue = [];
 
@@ -13421,17 +13346,9 @@
 	          oldVnode = emptyNodeAt(oldVnode);
 	        }
 	        // replacing existing element
-	        var oldElm = oldVnode.elm;
-	        var parentElm$1 = nodeOps.parentNode(oldElm);
-	        createElm(
-	          vnode,
-	          insertedVnodeQueue,
-	          // extremely rare edge case: do not insert if old element is in a
-	          // leaving transition. Only happens when combining transition +
-	          // keep-alive + HOCs. (#4590)
-	          oldElm._leaveCb ? null : parentElm$1,
-	          nodeOps.nextSibling(oldElm)
-	        );
+	        elm = oldVnode.elm;
+	        parent = nodeOps.parentNode(elm);
+	        createElm(vnode, insertedVnodeQueue, parent, nodeOps.nextSibling(elm));
 
 	        if (vnode.parent) {
 	          // component root element replaced.
@@ -13448,8 +13365,8 @@
 	          }
 	        }
 
-	        if (parentElm$1 !== null) {
-	          removeVnodes(parentElm$1, [oldVnode], 0, 0);
+	        if (parent !== null) {
+	          removeVnodes(parent, [oldVnode], 0, 0);
 	        } else if (isDef(oldVnode.tag)) {
 	          invokeDestroyHook(oldVnode);
 	        }
@@ -13679,17 +13596,11 @@
 
 	var target$1;
 
-	function add$2 (
-	  event,
-	  handler,
-	  once,
-	  capture
-	) {
+	function add$2 (event, handler, once, capture) {
 	  if (once) {
 	    var oldHandler = handler;
-	    var _target = target$1; // save current target element in closure
 	    handler = function (ev) {
-	      remove$3(event, handler, capture, _target);
+	      remove$3(event, handler, capture);
 	      arguments.length === 1
 	        ? oldHandler(ev)
 	        : oldHandler.apply(null, arguments);
@@ -13698,13 +13609,8 @@
 	  target$1.addEventListener(event, handler, capture);
 	}
 
-	function remove$3 (
-	  event,
-	  handler,
-	  capture,
-	  _target
-	) {
-	  (_target || target$1).removeEventListener(event, handler, capture);
+	function remove$3 (event, handler, capture) {
+	  target$1.removeEventListener(event, handler, capture);
 	}
 
 	function updateDOMListeners (oldVnode, vnode) {
@@ -13751,7 +13657,13 @@
 	      if (vnode.children) { vnode.children.length = 0; }
 	      if (cur === oldProps[key]) { continue }
 	    }
-
+	    // #4521: if a click event triggers update before the change event is
+	    // dispatched on a checkbox/radio input, the input's checked state will
+	    // be reset and fail to trigger another update.
+	    /* istanbul ignore next */
+	    if (key === 'checked' && !isDirty(elm, cur)) {
+	      continue
+	    }
 	    if (key === 'value') {
 	      // store value as _value as well since
 	      // non-string values will be stringified
@@ -13775,15 +13687,17 @@
 	  vnode,
 	  checkVal
 	) {
-	  return (!elm.composing && (
+	  if (!elm.composing && (
 	    vnode.tag === 'option' ||
 	    isDirty(elm, checkVal) ||
 	    isInputChanged(vnode, checkVal)
-	  ))
+	  )) {
+	    return true
+	  }
+	  return false
 	}
 
 	function isDirty (elm, checkVal) {
-	  // return true when textbox (.number and .trim) loses focus and its value is not equal to the updated value
 	  return document.activeElement !== elm && elm.value !== checkVal
 	}
 
@@ -13850,8 +13764,8 @@
 
 	  if (checkChild) {
 	    var childNode = vnode;
-	    while (childNode.componentInstance) {
-	      childNode = childNode.componentInstance._vnode;
+	    while (childNode.child) {
+	      childNode = childNode.child._vnode;
 	      if (childNode.data && (styleData = normalizeStyleData(childNode.data))) {
 	        extend(res, styleData);
 	      }
@@ -14025,11 +13939,7 @@
 	  }
 	}
 
-	// binding to window is necessary to make hot reload work in IE in strict mode
-	var raf = inBrowser && window.requestAnimationFrame
-	  ? window.requestAnimationFrame.bind(window)
-	  : setTimeout;
-
+	var raf = (inBrowser && window.requestAnimationFrame) || setTimeout;
 	function nextFrame (fn) {
 	  raf(function () {
 	    raf(fn);
@@ -14237,6 +14147,7 @@
 	      var parent = el.parentNode;
 	      var pendingNode = parent && parent._pending && parent._pending[vnode.key];
 	      if (pendingNode &&
+	          pendingNode.context === vnode.context &&
 	          pendingNode.tag === vnode.tag &&
 	          pendingNode.elm._leaveCb) {
 	        pendingNode.elm._leaveCb();
@@ -14574,8 +14485,8 @@
 
 	// recursively search for possible transition defined inside the component root
 	function locateNode (vnode) {
-	  return vnode.componentInstance && (!vnode.data || !vnode.data.transition)
-	    ? locateNode(vnode.componentInstance._vnode)
+	  return vnode.child && (!vnode.data || !vnode.data.transition)
+	    ? locateNode(vnode.child._vnode)
 	    : vnode
 	}
 
@@ -14710,7 +14621,6 @@
 	  name: 'transition',
 	  props: transitionProps,
 	  abstract: true,
-
 	  render: function render (h) {
 	    var this$1 = this;
 
@@ -14766,15 +14676,9 @@
 	      return placeholder(h, rawChild)
 	    }
 
-	    // ensure a key that is unique to the vnode type and to this transition
-	    // component instance. This key will be used to remove pending leaving nodes
-	    // during entering.
-	    var id = "__transition-" + (this._uid) + "-";
-	    var key = child.key = child.key == null
-	      ? id + child.tag
-	      : isPrimitive(child.key)
-	        ? (String(child.key).indexOf(id) === 0 ? child.key : id + child.key)
-	        : child.key;
+	    var key = child.key = child.key == null || child.isStatic
+	      ? ("__v" + (child.tag + this._uid) + "__")
+	      : child.key;
 	    var data = (child.data || (child.data = {})).transition = extractTransitionData(this);
 	    var oldRawChild = this._vnode;
 	    var oldChild = getRealChild(oldRawChild);
@@ -15121,6 +15025,22 @@
 
 	// Special Elements (can contain anything)
 	var isScriptOrStyle = makeMap('script,style', true);
+	var hasLang = function (attr) { return attr.name === 'lang' && attr.value !== 'html'; };
+	var isSpecialTag = function (tag, isSFC, stack) {
+	  if (isScriptOrStyle(tag)) {
+	    return true
+	  }
+	  if (isSFC && stack.length === 1) {
+	    // top-level template that has no pre-processor
+	    if (tag === 'template' && !stack[0].attrs.some(hasLang)) {
+	      return false
+	    } else {
+	      return true
+	    }
+	  }
+	  return false
+	};
+
 	var reCache = {};
 
 	var ltRE = /&lt;/g;
@@ -15149,7 +15069,7 @@
 	  while (html) {
 	    last = html;
 	    // Make sure we're not in a script or style element
-	    if (!lastTag || !isScriptOrStyle(lastTag)) {
+	    if (!lastTag || !isSpecialTag(lastTag, options.sfc, stack)) {
 	      var textEnd = html.indexOf('<');
 	      if (textEnd === 0) {
 	        // Comment:
@@ -15184,7 +15104,7 @@
 	        if (endTagMatch) {
 	          var curIndex = index;
 	          advance(endTagMatch[0].length);
-	          parseEndTag(endTagMatch[1], curIndex, index);
+	          parseEndTag(endTagMatch[0], endTagMatch[1], curIndex, index);
 	          continue
 	        }
 
@@ -15241,7 +15161,7 @@
 	      });
 	      index += html.length - rest.length;
 	      html = rest;
-	      parseEndTag(stackedTag, index - endTagLength, index);
+	      parseEndTag('</' + stackedTag + '>', stackedTag, index - endTagLength, index);
 	    }
 
 	    if (html === last && options.chars) {
@@ -15287,10 +15207,10 @@
 
 	    if (expectHTML) {
 	      if (lastTag === 'p' && isNonPhrasingTag(tagName)) {
-	        parseEndTag(lastTag);
+	        parseEndTag('', lastTag);
 	      }
 	      if (canBeLeftOpenTag(tagName) && lastTag === tagName) {
-	        parseEndTag(tagName);
+	        parseEndTag('', tagName);
 	      }
 	    }
 
@@ -15317,7 +15237,7 @@
 	    }
 
 	    if (!unary) {
-	      stack.push({ tag: tagName, lowerCasedTag: tagName.toLowerCase(), attrs: attrs });
+	      stack.push({ tag: tagName, attrs: attrs });
 	      lastTag = tagName;
 	      unarySlash = '';
 	    }
@@ -15327,19 +15247,16 @@
 	    }
 	  }
 
-	  function parseEndTag (tagName, start, end) {
-	    var pos, lowerCasedTagName;
+	  function parseEndTag (tag, tagName, start, end) {
+	    var pos;
 	    if (start == null) { start = index; }
 	    if (end == null) { end = index; }
 
-	    if (tagName) {
-	      lowerCasedTagName = tagName.toLowerCase();
-	    }
-
 	    // Find the closest opened tag of the same type
 	    if (tagName) {
+	      var needle = tagName.toLowerCase();
 	      for (pos = stack.length - 1; pos >= 0; pos--) {
-	        if (stack[pos].lowerCasedTag === lowerCasedTagName) {
+	        if (stack[pos].tag.toLowerCase() === needle) {
 	          break
 	        }
 	      }
@@ -15359,11 +15276,11 @@
 	      // Remove the open elements from the stack
 	      stack.length = pos;
 	      lastTag = pos && stack[pos - 1].tag;
-	    } else if (lowerCasedTagName === 'br') {
+	    } else if (tagName.toLowerCase() === 'br') {
 	      if (options.start) {
 	        options.start(tagName, [], true, start, end);
 	      }
-	    } else if (lowerCasedTagName === 'p') {
+	    } else if (tagName.toLowerCase() === 'p') {
 	      if (options.start) {
 	        options.start(tagName, [], false, start, end);
 	      }
@@ -15473,7 +15390,7 @@
 	/*  */
 
 	var defaultTagRE = /\{\{((?:.|\n)+?)\}\}/g;
-	var regexEscapeRE = /[-.*+?^${}()|[\]\/\\]/g;
+	var regexEscapeRE = /[-.*+?^${}()|[\]/\\]/g;
 
 	var buildRegex = cached(function (delimiters) {
 	  var open = delimiters[0].replace(regexEscapeRE, '\\$&');
@@ -16126,7 +16043,7 @@
 	            name = camelize(name);
 	          }
 	        }
-	        if (isProp || platformMustUseProp(el.tag, el.attrsMap.type, name)) {
+	        if (isProp || platformMustUseProp(el.tag, name)) {
 	          addProp(el, name, value);
 	        } else {
 	          addAttr(el, name, value);
@@ -16160,6 +16077,15 @@
 	        }
 	      }
 	      addAttr(el, name, JSON.stringify(value));
+	      // #4530 also bind special attributes as props even if they are static
+	      // so that patches between dynamic/static are consistent
+	      if (platformMustUseProp(el.tag, name)) {
+	        if (name === 'value') {
+	          addProp(el, name, JSON.stringify(value));
+	        } else {
+	          addProp(el, name, 'true');
+	        }
+	      }
 	    }
 	  }
 	}
@@ -16736,16 +16662,13 @@
 	  var res = 0;
 	  for (var i = 0; i < children.length; i++) {
 	    var el = children[i];
-	    if (el.type !== 1) {
-	      continue
-	    }
 	    if (needsNormalization(el) ||
-	        (el.ifConditions && el.ifConditions.some(function (c) { return needsNormalization(c.block); }))) {
+	        (el.if && el.ifConditions.some(function (c) { return needsNormalization(c.block); }))) {
 	      res = 2;
 	      break
 	    }
 	    if (maybeComponent(el) ||
-	        (el.ifConditions && el.ifConditions.some(function (c) { return maybeComponent(c.block); }))) {
+	        (el.if && el.ifConditions.some(function (c) { return maybeComponent(c.block); }))) {
 	      res = 1;
 	    }
 	  }
@@ -16753,11 +16676,11 @@
 	}
 
 	function needsNormalization (el) {
-	  return el.for !== undefined || el.tag === 'template' || el.tag === 'slot'
+	  return el.for || el.tag === 'template' || el.tag === 'slot'
 	}
 
 	function maybeComponent (el) {
-	  return !isPlatformReservedTag$1(el.tag)
+	  return el.type === 1 && !isPlatformReservedTag$1(el.tag)
 	}
 
 	function genNode (node) {
@@ -17060,7 +16983,7 @@
 	          : (":_q(" + value + "," + trueValueBinding + ")")
 	      )
 	  );
-	  addHandler(el, 'click',
+	  addHandler(el, 'change',
 	    "var $$a=" + value + "," +
 	        '$$el=$event.target,' +
 	        "$$c=$$el.checked?(" + trueValueBinding + "):(" + falseValueBinding + ");" +
@@ -17091,7 +17014,7 @@
 	  var valueBinding = getBindingAttr(el, 'value') || 'null';
 	  valueBinding = number ? ("_n(" + valueBinding + ")") : valueBinding;
 	  addProp(el, 'checked', ("_q(" + value + "," + valueBinding + ")"));
-	  addHandler(el, 'click', genAssignmentCode(value, valueBinding), null, true);
+	  addHandler(el, 'change', genAssignmentCode(value, valueBinding), null, true);
 	}
 
 	function genDefaultModel (
@@ -34517,23 +34440,23 @@
 
 	var _marker2 = _interopRequireDefault(_marker);
 
-	var _cluster = __webpack_require__(409);
+	var _cluster = __webpack_require__(407);
 
 	var _cluster2 = _interopRequireDefault(_cluster);
 
-	var _polyline = __webpack_require__(415);
+	var _polyline = __webpack_require__(413);
 
 	var _polyline2 = _interopRequireDefault(_polyline);
 
-	var _polygon = __webpack_require__(423);
+	var _polygon = __webpack_require__(421);
 
 	var _polygon2 = _interopRequireDefault(_polygon);
 
-	var _circle = __webpack_require__(424);
+	var _circle = __webpack_require__(422);
 
 	var _circle2 = _interopRequireDefault(_circle);
 
-	var _rectangle = __webpack_require__(425);
+	var _rectangle = __webpack_require__(423);
 
 	var _rectangle2 = _interopRequireDefault(_rectangle);
 
@@ -34541,7 +34464,7 @@
 
 	var _lodash2 = _interopRequireDefault(_lodash);
 
-	var _infoWindow = __webpack_require__(426);
+	var _infoWindow = __webpack_require__(424);
 
 	var _infoWindow2 = _interopRequireDefault(_infoWindow);
 
@@ -34549,15 +34472,15 @@
 
 	var _map2 = _interopRequireDefault(_map);
 
-	var _streetViewPanorama = __webpack_require__(429);
+	var _streetViewPanorama = __webpack_require__(427);
 
 	var _streetViewPanorama2 = _interopRequireDefault(_streetViewPanorama);
 
-	var _placeInput = __webpack_require__(434);
+	var _placeInput = __webpack_require__(432);
 
 	var _placeInput2 = _interopRequireDefault(_placeInput);
 
-	var _autocomplete = __webpack_require__(438);
+	var _autocomplete = __webpack_require__(436);
 
 	var _autocomplete2 = _interopRequireDefault(_autocomplete);
 
@@ -34565,7 +34488,7 @@
 
 	var _mapElementMixin2 = _interopRequireDefault(_mapElementMixin);
 
-	var _mountableMixin = __webpack_require__(406);
+	var _mountableMixin = __webpack_require__(404);
 
 	var _mountableMixin2 = _interopRequireDefault(_mountableMixin);
 
@@ -36769,11 +36692,11 @@
 
 	var _mapElementMixin2 = _interopRequireDefault(_mapElementMixin);
 
-	var _cluster = __webpack_require__(409);
+	var _cluster = __webpack_require__(407);
 
 	var _cluster2 = _interopRequireDefault(_cluster);
 
-	var _assert = __webpack_require__(411);
+	var _assert = __webpack_require__(409);
 
 	var _assert2 = _interopRequireDefault(_assert);
 
@@ -36802,6 +36725,7 @@
 	    default: false
 	  },
 	  icon: {
+	    type: Object,
 	    twoWay: true
 	  },
 	  label: {},
@@ -37242,23 +37166,31 @@
 /* 398 */
 /***/ function(module, exports, __webpack_require__) {
 
-	
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
+
 	/* styles */
 	__webpack_require__(399)
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(405),
-	  /* template */
-	  __webpack_require__(408),
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\map.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
-	if (Component.options.functional) {console.error("[vue-loader] map.vue: functional components are not supported with templates, they should use render functions.")}
+	/* script */
+	__vue_exports__ = __webpack_require__(403)
+
+	/* template */
+	var __vue_template__ = __webpack_require__(406)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\map.vue"
+	__vue_options__.render = __vue_template__.render
+	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
 
 	/* hot reload */
 	if (false) {(function () {
@@ -37267,13 +37199,14 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-37a83a9f", Component.options)
+	    hotAPI.createRecord("data-v-3d75c008", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-37a83a9f", Component.options)
+	    hotAPI.reload("data-v-3d75c008", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] map.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
@@ -37285,21 +37218,21 @@
 	// load the styles
 	var content = __webpack_require__(400);
 	if(typeof content === 'string') content = [[module.id, content, '']];
-	if(content.locals) module.exports = content.locals;
 	// add the styles to the DOM
-	var update = __webpack_require__(402)("c47436a2", content, false);
+	var update = __webpack_require__(402)(content, {});
+	if(content.locals) module.exports = content.locals;
 	// Hot Module Replacement
 	if(false) {
-	 // When the styles change, update the <style> tags
-	 if(!content.locals) {
-	   module.hot.accept("!!../../../css-loader/index.js!../../../vue-loader/lib/style-rewriter.js?id=data-v-37a83a9f!../../../vue-loader/lib/selector.js?type=styles&index=0!./map.vue", function() {
-	     var newContent = require("!!../../../css-loader/index.js!../../../vue-loader/lib/style-rewriter.js?id=data-v-37a83a9f!../../../vue-loader/lib/selector.js?type=styles&index=0!./map.vue");
-	     if(typeof newContent === 'string') newContent = [[module.id, newContent, '']];
-	     update(newContent);
-	   });
-	 }
-	 // When the module is disposed, remove the <style> tags
-	 module.hot.dispose(function() { update(); });
+		// When the styles change, update the <style> tags
+		if(!content.locals) {
+			module.hot.accept("!!./../../../css-loader/index.js!./../../../vue-loader/lib/style-rewriter.js?id=data-v-3d75c008!./../../../vue-loader/lib/selector.js?type=styles&index=0!./map.vue", function() {
+				var newContent = require("!!./../../../css-loader/index.js!./../../../vue-loader/lib/style-rewriter.js?id=data-v-3d75c008!./../../../vue-loader/lib/selector.js?type=styles&index=0!./map.vue");
+				if(typeof newContent === 'string') newContent = [[module.id, newContent, '']];
+				update(newContent);
+			});
+		}
+		// When the module is disposed, remove the <style> tags
+		module.hot.dispose(function() { update(); });
 	}
 
 /***/ },
@@ -37377,325 +37310,225 @@
 /***/ function(module, exports, __webpack_require__) {
 
 	/*
-	  MIT License http://www.opensource.org/licenses/mit-license.php
-	  Author Tobias Koppers @sokra
-	  Modified by Evan You @yyx990803
+		MIT License http://www.opensource.org/licenses/mit-license.php
+		Author Tobias Koppers @sokra
 	*/
+	var stylesInDom = {},
+		memoize = function(fn) {
+			var memo;
+			return function () {
+				if (typeof memo === "undefined") memo = fn.apply(this, arguments);
+				return memo;
+			};
+		},
+		isOldIE = memoize(function() {
+			return /msie [6-9]\b/.test(window.navigator.userAgent.toLowerCase());
+		}),
+		getHeadElement = memoize(function () {
+			return document.head || document.getElementsByTagName("head")[0];
+		}),
+		singletonElement = null,
+		singletonCounter = 0,
+		styleElementsInsertedAtTop = [];
 
-	var hasDocument = typeof document !== 'undefined'
+	module.exports = function(list, options) {
+		if(false) {
+			if(typeof document !== "object") throw new Error("The style-loader cannot be used in a non-browser environment");
+		}
 
-	if (false) {
-	  if (!hasDocument) {
-	    throw new Error(
-	    'vue-style-loader cannot be used in a non-browser environment. ' +
-	    "Use { target: 'node' } in your Webpack config to indicate a server-rendering environment."
-	  ) }
+		options = options || {};
+		// Force single-tag solution on IE6-9, which has a hard limit on the # of <style>
+		// tags it will allow on a page
+		if (typeof options.singleton === "undefined") options.singleton = isOldIE();
+
+		// By default, add <style> tags to the bottom of <head>.
+		if (typeof options.insertAt === "undefined") options.insertAt = "bottom";
+
+		var styles = listToStyles(list);
+		addStylesToDom(styles, options);
+
+		return function update(newList) {
+			var mayRemove = [];
+			for(var i = 0; i < styles.length; i++) {
+				var item = styles[i];
+				var domStyle = stylesInDom[item.id];
+				domStyle.refs--;
+				mayRemove.push(domStyle);
+			}
+			if(newList) {
+				var newStyles = listToStyles(newList);
+				addStylesToDom(newStyles, options);
+			}
+			for(var i = 0; i < mayRemove.length; i++) {
+				var domStyle = mayRemove[i];
+				if(domStyle.refs === 0) {
+					for(var j = 0; j < domStyle.parts.length; j++)
+						domStyle.parts[j]();
+					delete stylesInDom[domStyle.id];
+				}
+			}
+		};
 	}
 
-	var listToStyles = __webpack_require__(403)
-
-	/*
-	type StyleObject = {
-	  id: number;
-	  parts: Array<StyleObjectPart>
+	function addStylesToDom(styles, options) {
+		for(var i = 0; i < styles.length; i++) {
+			var item = styles[i];
+			var domStyle = stylesInDom[item.id];
+			if(domStyle) {
+				domStyle.refs++;
+				for(var j = 0; j < domStyle.parts.length; j++) {
+					domStyle.parts[j](item.parts[j]);
+				}
+				for(; j < item.parts.length; j++) {
+					domStyle.parts.push(addStyle(item.parts[j], options));
+				}
+			} else {
+				var parts = [];
+				for(var j = 0; j < item.parts.length; j++) {
+					parts.push(addStyle(item.parts[j], options));
+				}
+				stylesInDom[item.id] = {id: item.id, refs: 1, parts: parts};
+			}
+		}
 	}
 
-	type StyleObjectPart = {
-	  css: string;
-	  media: string;
-	  sourceMap: ?string
-	}
-	*/
-
-	var stylesInDom = {/*
-	  [id: number]: {
-	    id: number,
-	    refs: number,
-	    parts: Array<(obj?: StyleObjectPart) => void>
-	  }
-	*/}
-
-	var head = hasDocument && (document.head || document.getElementsByTagName('head')[0])
-	var singletonElement = null
-	var singletonCounter = 0
-	var isProduction = false
-	var noop = function () {}
-
-	// Force single-tag solution on IE6-9, which has a hard limit on the # of <style>
-	// tags it will allow on a page
-	var isOldIE = typeof navigator !== 'undefined' && /msie [6-9]\b/.test(navigator.userAgent.toLowerCase())
-
-	module.exports = function (parentId, list, _isProduction) {
-	  isProduction = _isProduction
-
-	  var styles = listToStyles(parentId, list)
-	  addStylesToDom(styles)
-
-	  return function update (newList) {
-	    var mayRemove = []
-	    for (var i = 0; i < styles.length; i++) {
-	      var item = styles[i]
-	      var domStyle = stylesInDom[item.id]
-	      domStyle.refs--
-	      mayRemove.push(domStyle)
-	    }
-	    if (newList) {
-	      styles = listToStyles(parentId, newList)
-	      addStylesToDom(styles)
-	    } else {
-	      styles = []
-	    }
-	    for (var i = 0; i < mayRemove.length; i++) {
-	      var domStyle = mayRemove[i]
-	      if (domStyle.refs === 0) {
-	        for (var j = 0; j < domStyle.parts.length; j++) {
-	          domStyle.parts[j]()
-	        }
-	        delete stylesInDom[domStyle.id]
-	      }
-	    }
-	  }
+	function listToStyles(list) {
+		var styles = [];
+		var newStyles = {};
+		for(var i = 0; i < list.length; i++) {
+			var item = list[i];
+			var id = item[0];
+			var css = item[1];
+			var media = item[2];
+			var sourceMap = item[3];
+			var part = {css: css, media: media, sourceMap: sourceMap};
+			if(!newStyles[id])
+				styles.push(newStyles[id] = {id: id, parts: [part]});
+			else
+				newStyles[id].parts.push(part);
+		}
+		return styles;
 	}
 
-	function addStylesToDom (styles /* Array<StyleObject> */) {
-	  for (var i = 0; i < styles.length; i++) {
-	    var item = styles[i]
-	    var domStyle = stylesInDom[item.id]
-	    if (domStyle) {
-	      domStyle.refs++
-	      for (var j = 0; j < domStyle.parts.length; j++) {
-	        domStyle.parts[j](item.parts[j])
-	      }
-	      for (; j < item.parts.length; j++) {
-	        domStyle.parts.push(addStyle(item.parts[j]))
-	      }
-	      if (domStyle.parts.length > item.parts.length) {
-	        domStyle.parts.length = item.parts.length
-	      }
-	    } else {
-	      var parts = []
-	      for (var j = 0; j < item.parts.length; j++) {
-	        parts.push(addStyle(item.parts[j]))
-	      }
-	      stylesInDom[item.id] = { id: item.id, refs: 1, parts: parts }
-	    }
-	  }
+	function insertStyleElement(options, styleElement) {
+		var head = getHeadElement();
+		var lastStyleElementInsertedAtTop = styleElementsInsertedAtTop[styleElementsInsertedAtTop.length - 1];
+		if (options.insertAt === "top") {
+			if(!lastStyleElementInsertedAtTop) {
+				head.insertBefore(styleElement, head.firstChild);
+			} else if(lastStyleElementInsertedAtTop.nextSibling) {
+				head.insertBefore(styleElement, lastStyleElementInsertedAtTop.nextSibling);
+			} else {
+				head.appendChild(styleElement);
+			}
+			styleElementsInsertedAtTop.push(styleElement);
+		} else if (options.insertAt === "bottom") {
+			head.appendChild(styleElement);
+		} else {
+			throw new Error("Invalid value for parameter 'insertAt'. Must be 'top' or 'bottom'.");
+		}
 	}
 
-	function listToStyles (parentId, list) {
-	  var styles = []
-	  var newStyles = {}
-	  for (var i = 0; i < list.length; i++) {
-	    var item = list[i]
-	    var id = item[0]
-	    var css = item[1]
-	    var media = item[2]
-	    var sourceMap = item[3]
-	    var part = { css: css, media: media, sourceMap: sourceMap }
-	    if (!newStyles[id]) {
-	      part.id = parentId + ':0'
-	      styles.push(newStyles[id] = { id: id, parts: [part] })
-	    } else {
-	      part.id = parentId + ':' + newStyles[id].parts.length
-	      newStyles[id].parts.push(part)
-	    }
-	  }
-	  return styles
+	function removeStyleElement(styleElement) {
+		styleElement.parentNode.removeChild(styleElement);
+		var idx = styleElementsInsertedAtTop.indexOf(styleElement);
+		if(idx >= 0) {
+			styleElementsInsertedAtTop.splice(idx, 1);
+		}
 	}
 
-	function createStyleElement () {
-	  var styleElement = document.createElement('style')
-	  styleElement.type = 'text/css'
-	  head.appendChild(styleElement)
-	  return styleElement
+	function createStyleElement(options) {
+		var styleElement = document.createElement("style");
+		styleElement.type = "text/css";
+		insertStyleElement(options, styleElement);
+		return styleElement;
 	}
 
-	function addStyle (obj /* StyleObjectPart */) {
-	  var update, remove
-	  var styleElement = document.querySelector('style[data-vue-ssr-id~="' + obj.id + '"]')
-	  var hasSSR = styleElement != null
+	function addStyle(obj, options) {
+		var styleElement, update, remove;
 
-	  // if in production mode and style is already provided by SSR,
-	  // simply do nothing.
-	  if (hasSSR && isProduction) {
-	    return noop
-	  }
+		if (options.singleton) {
+			var styleIndex = singletonCounter++;
+			styleElement = singletonElement || (singletonElement = createStyleElement(options));
+			update = applyToSingletonTag.bind(null, styleElement, styleIndex, false);
+			remove = applyToSingletonTag.bind(null, styleElement, styleIndex, true);
+		} else {
+			styleElement = createStyleElement(options);
+			update = applyToTag.bind(null, styleElement);
+			remove = function() {
+				removeStyleElement(styleElement);
+			};
+		}
 
-	  if (isOldIE) {
-	    // use singleton mode for IE9.
-	    var styleIndex = singletonCounter++
-	    styleElement = singletonElement || (singletonElement = createStyleElement())
-	    update = applyToSingletonTag.bind(null, styleElement, styleIndex, false)
-	    remove = applyToSingletonTag.bind(null, styleElement, styleIndex, true)
-	  } else {
-	    // use multi-style-tag mode in all other cases
-	    styleElement = styleElement || createStyleElement()
-	    update = applyToTag.bind(null, styleElement)
-	    remove = function () {
-	      styleElement.parentNode.removeChild(styleElement)
-	    }
-	  }
+		update(obj);
 
-	  if (!hasSSR) {
-	    update(obj)
-	  }
-
-	  return function updateStyle (newObj /* StyleObjectPart */) {
-	    if (newObj) {
-	      if (newObj.css === obj.css &&
-	          newObj.media === obj.media &&
-	          newObj.sourceMap === obj.sourceMap) {
-	        return
-	      }
-	      update(obj = newObj)
-	    } else {
-	      remove()
-	    }
-	  }
+		return function updateStyle(newObj) {
+			if(newObj) {
+				if(newObj.css === obj.css && newObj.media === obj.media && newObj.sourceMap === obj.sourceMap)
+					return;
+				update(obj = newObj);
+			} else {
+				remove();
+			}
+		};
 	}
 
 	var replaceText = (function () {
-	  var textStore = []
+		var textStore = [];
 
-	  return function (index, replacement) {
-	    textStore[index] = replacement
-	    return textStore.filter(Boolean).join('\n')
-	  }
-	})()
+		return function (index, replacement) {
+			textStore[index] = replacement;
+			return textStore.filter(Boolean).join('\n');
+		};
+	})();
 
-	function applyToSingletonTag (styleElement, index, remove, obj) {
-	  var css = remove ? '' : obj.css
+	function applyToSingletonTag(styleElement, index, remove, obj) {
+		var css = remove ? "" : obj.css;
 
-	  if (styleElement.styleSheet) {
-	    styleElement.styleSheet.cssText = replaceText(index, css)
-	  } else {
-	    var cssNode = document.createTextNode(css)
-	    var childNodes = styleElement.childNodes
-	    if (childNodes[index]) styleElement.removeChild(childNodes[index])
-	    if (childNodes.length) {
-	      styleElement.insertBefore(cssNode, childNodes[index])
-	    } else {
-	      styleElement.appendChild(cssNode)
-	    }
-	  }
+		if (styleElement.styleSheet) {
+			styleElement.styleSheet.cssText = replaceText(index, css);
+		} else {
+			var cssNode = document.createTextNode(css);
+			var childNodes = styleElement.childNodes;
+			if (childNodes[index]) styleElement.removeChild(childNodes[index]);
+			if (childNodes.length) {
+				styleElement.insertBefore(cssNode, childNodes[index]);
+			} else {
+				styleElement.appendChild(cssNode);
+			}
+		}
 	}
 
-	function applyToTag (styleElement, obj) {
-	  var css = obj.css
-	  var media = obj.media
-	  var sourceMap = obj.sourceMap
+	function applyToTag(styleElement, obj) {
+		var css = obj.css;
+		var media = obj.media;
+		var sourceMap = obj.sourceMap;
 
-	  if (media) {
-	    styleElement.setAttribute('media', media)
-	  }
+		if (media) {
+			styleElement.setAttribute("media", media);
+		}
 
-	  if (sourceMap) {
-	    // https://developer.chrome.com/devtools/docs/javascript-debugging
-	    // this makes source maps inside style tags work properly in Chrome
-	    css += '\n/*# sourceURL=' + sourceMap.sources[0] + ' */'
-	    // http://stackoverflow.com/a/26603875
-	    css += '\n/*# sourceMappingURL=data:application/json;base64,' + btoa(unescape(encodeURIComponent(JSON.stringify(sourceMap)))) + ' */'
-	  }
+		if (sourceMap) {
+			// https://developer.chrome.com/devtools/docs/javascript-debugging
+			// this makes source maps inside style tags work properly in Chrome
+			css += '\n/*# sourceURL=' + sourceMap.sources[0] + ' */';
+			// http://stackoverflow.com/a/26603875
+			css += "\n/*# sourceMappingURL=data:application/json;base64," + btoa(unescape(encodeURIComponent(JSON.stringify(sourceMap)))) + " */";
+		}
 
-	  if (styleElement.styleSheet) {
-	    styleElement.styleSheet.cssText = css
-	  } else {
-	    while (styleElement.firstChild) {
-	      styleElement.removeChild(styleElement.firstChild)
-	    }
-	    styleElement.appendChild(document.createTextNode(css))
-	  }
+		if (styleElement.styleSheet) {
+			styleElement.styleSheet.cssText = css;
+		} else {
+			while(styleElement.firstChild) {
+				styleElement.removeChild(styleElement.firstChild);
+			}
+			styleElement.appendChild(document.createTextNode(css));
+		}
 	}
 
 
 /***/ },
 /* 403 */
-/***/ function(module, exports) {
-
-	/**
-	 * Translates the list format produced by css-loader into something
-	 * easier to manipulate.
-	 */
-	module.exports = function listToStyles (parentId, list) {
-	  var styles = []
-	  var newStyles = {}
-	  for (var i = 0; i < list.length; i++) {
-	    var item = list[i]
-	    var id = item[0]
-	    var css = item[1]
-	    var media = item[2]
-	    var sourceMap = item[3]
-	    var part = {
-	      id: parentId + ':' + i,
-	      css: css,
-	      media: media,
-	      sourceMap: sourceMap
-	    }
-	    if (!newStyles[id]) {
-	      styles.push(newStyles[id] = { id: id, parts: [part] })
-	    } else {
-	      newStyles[id].parts.push(part)
-	    }
-	  }
-	  return styles
-	}
-
-
-/***/ },
-/* 404 */
-/***/ function(module, exports) {
-
-	module.exports = function normalizeComponent (
-	  rawScriptExports,
-	  compiledTemplate,
-	  scopeId,
-	  cssModules
-	) {
-	  var esModule
-	  var scriptExports = rawScriptExports = rawScriptExports || {}
-
-	  // ES6 modules interop
-	  var type = typeof rawScriptExports.default
-	  if (type === 'object' || type === 'function') {
-	    esModule = rawScriptExports
-	    scriptExports = rawScriptExports.default
-	  }
-
-	  // Vue.extend constructor export interop
-	  var options = typeof scriptExports === 'function'
-	    ? scriptExports.options
-	    : scriptExports
-
-	  // render functions
-	  if (compiledTemplate) {
-	    options.render = compiledTemplate.render
-	    options.staticRenderFns = compiledTemplate.staticRenderFns
-	  }
-
-	  // scopedId
-	  if (scopeId) {
-	    options._scopeId = scopeId
-	  }
-
-	  // inject cssModules
-	  if (cssModules) {
-	    var computed = options.computed || (options.computed = {})
-	    Object.keys(cssModules).forEach(function (key) {
-	      var module = cssModules[key]
-	      computed[key] = function () { return module }
-	    })
-	  }
-
-	  return {
-	    esModule: esModule,
-	    exports: scriptExports,
-	    options: options
-	  }
-	}
-
-
-/***/ },
-/* 405 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -37728,11 +37561,11 @@
 
 	var _getPropsValuesMixin2 = _interopRequireDefault(_getPropsValuesMixin);
 
-	var _mountableMixin = __webpack_require__(406);
+	var _mountableMixin = __webpack_require__(404);
 
 	var _mountableMixin2 = _interopRequireDefault(_mountableMixin);
 
-	var _latlngChangedHandler = __webpack_require__(407);
+	var _latlngChangedHandler = __webpack_require__(405);
 
 	var _latlngChangedHandler2 = _interopRequireDefault(_latlngChangedHandler);
 
@@ -37863,11 +37696,10 @@
 	      // manually trigger center and zoom
 	      _this2.$mapObject.addListener('center_changed', function () {
 	        _this2.$emit('center_changed', _this2.$mapObject.getCenter());
+	        _this2.$emit('bounds_changed', _this2.$mapObject.getBounds());
 	      });
 	      _this2.$mapObject.addListener('zoom_changed', function () {
 	        _this2.$emit('zoom_changed', _this2.$mapObject.getZoom());
-	      });
-	      _this2.$mapObject.addListener('bounds_changed', function () {
 	        _this2.$emit('bounds_changed', _this2.$mapObject.getBounds());
 	      });
 
@@ -37886,7 +37718,7 @@
 	};
 
 /***/ },
-/* 406 */
+/* 404 */
 /***/ function(module, exports) {
 
 	'use strict';
@@ -37955,7 +37787,7 @@
 	};
 
 /***/ },
-/* 407 */
+/* 405 */
 /***/ function(module, exports) {
 
 	'use strict';
@@ -37983,7 +37815,7 @@
 	}
 
 /***/ },
-/* 408 */
+/* 406 */
 /***/ function(module, exports, __webpack_require__) {
 
 	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
@@ -38000,12 +37832,12 @@
 	if (false) {
 	  module.hot.accept()
 	  if (module.hot.data) {
-	     require("vue-hot-reload-api").rerender("data-v-37a83a9f", module.exports)
+	     require("vue-hot-reload-api").rerender("data-v-3d75c008", module.exports)
 	  }
 	}
 
 /***/ },
-/* 409 */
+/* 407 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -38030,7 +37862,7 @@
 
 	var _getPropsValuesMixin2 = _interopRequireDefault(_getPropsValuesMixin);
 
-	var _markerClustererPlus = __webpack_require__(410);
+	var _markerClustererPlus = __webpack_require__(408);
 
 	var _markerClustererPlus2 = _interopRequireDefault(_markerClustererPlus);
 
@@ -38096,7 +37928,7 @@
 	};
 
 /***/ },
-/* 410 */
+/* 408 */
 /***/ function(module, exports) {
 
 	/**
@@ -39736,7 +39568,7 @@
 
 
 /***/ },
-/* 411 */
+/* 409 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(global) {'use strict';
@@ -39807,7 +39639,7 @@
 	// ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 	// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-	var util = __webpack_require__(412);
+	var util = __webpack_require__(410);
 	var hasOwn = Object.prototype.hasOwnProperty;
 	var pSlice = Array.prototype.slice;
 	var functionsHaveNames = (function () {
@@ -40233,7 +40065,7 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, (function() { return this; }())))
 
 /***/ },
-/* 412 */
+/* 410 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(global, process) {// Copyright Joyent, Inc. and other Node contributors.
@@ -40761,7 +40593,7 @@
 	}
 	exports.isPrimitive = isPrimitive;
 
-	exports.isBuffer = __webpack_require__(413);
+	exports.isBuffer = __webpack_require__(411);
 
 	function objectToString(o) {
 	  return Object.prototype.toString.call(o);
@@ -40805,7 +40637,7 @@
 	 *     prototype.
 	 * @param {function} superCtor Constructor function to inherit prototype from.
 	 */
-	exports.inherits = __webpack_require__(414);
+	exports.inherits = __webpack_require__(412);
 
 	exports._extend = function(origin, add) {
 	  // Don't do anything if add isn't an object
@@ -40826,7 +40658,7 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, (function() { return this; }()), __webpack_require__(294)))
 
 /***/ },
-/* 413 */
+/* 411 */
 /***/ function(module, exports) {
 
 	module.exports = function isBuffer(arg) {
@@ -40837,7 +40669,7 @@
 	}
 
 /***/ },
-/* 414 */
+/* 412 */
 /***/ function(module, exports) {
 
 	if (typeof Object.create === 'function') {
@@ -40866,7 +40698,7 @@
 
 
 /***/ },
-/* 415 */
+/* 413 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -40875,7 +40707,7 @@
 	  value: true
 	});
 
-	var _slicedToArray2 = __webpack_require__(416);
+	var _slicedToArray2 = __webpack_require__(414);
 
 	var _slicedToArray3 = _interopRequireDefault(_slicedToArray2);
 
@@ -40989,18 +40821,18 @@
 	};
 
 /***/ },
-/* 416 */
+/* 414 */
 /***/ function(module, exports, __webpack_require__) {
 
 	"use strict";
 
 	exports.__esModule = true;
 
-	var _isIterable2 = __webpack_require__(417);
+	var _isIterable2 = __webpack_require__(415);
 
 	var _isIterable3 = _interopRequireDefault(_isIterable2);
 
-	var _getIterator2 = __webpack_require__(420);
+	var _getIterator2 = __webpack_require__(418);
 
 	var _getIterator3 = _interopRequireDefault(_getIterator2);
 
@@ -41045,21 +40877,21 @@
 	}();
 
 /***/ },
-/* 417 */
+/* 415 */
 /***/ function(module, exports, __webpack_require__) {
 
-	module.exports = { "default": __webpack_require__(418), __esModule: true };
+	module.exports = { "default": __webpack_require__(416), __esModule: true };
 
 /***/ },
-/* 418 */
+/* 416 */
 /***/ function(module, exports, __webpack_require__) {
 
 	__webpack_require__(355);
 	__webpack_require__(342);
-	module.exports = __webpack_require__(419);
+	module.exports = __webpack_require__(417);
 
 /***/ },
-/* 419 */
+/* 417 */
 /***/ function(module, exports, __webpack_require__) {
 
 	var classof   = __webpack_require__(379)
@@ -41073,21 +40905,21 @@
 	};
 
 /***/ },
-/* 420 */
+/* 418 */
 /***/ function(module, exports, __webpack_require__) {
 
-	module.exports = { "default": __webpack_require__(421), __esModule: true };
+	module.exports = { "default": __webpack_require__(419), __esModule: true };
 
 /***/ },
-/* 421 */
+/* 419 */
 /***/ function(module, exports, __webpack_require__) {
 
 	__webpack_require__(355);
 	__webpack_require__(342);
-	module.exports = __webpack_require__(422);
+	module.exports = __webpack_require__(420);
 
 /***/ },
-/* 422 */
+/* 420 */
 /***/ function(module, exports, __webpack_require__) {
 
 	var anObject = __webpack_require__(331)
@@ -41099,7 +40931,7 @@
 	};
 
 /***/ },
-/* 423 */
+/* 421 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -41108,7 +40940,11 @@
 	  value: true
 	});
 
-	var _slicedToArray2 = __webpack_require__(416);
+	var _getIterator2 = __webpack_require__(418);
+
+	var _getIterator3 = _interopRequireDefault(_getIterator2);
+
+	var _slicedToArray2 = __webpack_require__(414);
 
 	var _slicedToArray3 = _interopRequireDefault(_slicedToArray2);
 
@@ -41206,12 +41042,33 @@
 	          var eventListeners = [];
 
 	          var mvcArray = _this.$polygonObject.getPaths();
-	          for (var i = 0; i < mvcArray.getLength(); i++) {
-	            var mvcPath = mvcArray.getAt(i);
-	            eventListeners.push([mvcPath, mvcPath.addListener('insert_at', updatePaths)]);
-	            eventListeners.push([mvcPath, mvcPath.addListener('remove_at', updatePaths)]);
-	            eventListeners.push([mvcPath, mvcPath.addListener('set_at', updatePaths)]);
+	          var _iteratorNormalCompletion = true;
+	          var _didIteratorError = false;
+	          var _iteratorError = undefined;
+
+	          try {
+	            for (var _iterator = (0, _getIterator3.default)(mvcArray), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
+	              var mvcPath = _step.value;
+
+	              eventListeners.push([mvcPath, mvcPath.addListener('insert_at', updatePaths)]);
+	              eventListeners.push([mvcPath, mvcPath.addListener('remove_at', updatePaths)]);
+	              eventListeners.push([mvcPath, mvcPath.addListener('set_at', updatePaths)]);
+	            }
+	          } catch (err) {
+	            _didIteratorError = true;
+	            _iteratorError = err;
+	          } finally {
+	            try {
+	              if (!_iteratorNormalCompletion && _iterator.return) {
+	                _iterator.return();
+	              }
+	            } finally {
+	              if (_didIteratorError) {
+	                throw _iteratorError;
+	              }
+	            }
 	          }
+
 	          eventListeners.push([mvcArray, mvcArray.addListener('insert_at', updatePaths)]);
 	          eventListeners.push([mvcArray, mvcArray.addListener('remove_at', updatePaths)]);
 	          eventListeners.push([mvcArray, mvcArray.addListener('set_at', updatePaths)]);
@@ -41228,8 +41085,7 @@
 	        })();
 	      }
 	    }, {
-	      deep: this.deepWatch,
-	      immediate: true
+	      deep: this.deepWatch
 	    });
 
 	    this.$watch('path', function (path) {
@@ -41262,8 +41118,7 @@
 	        })();
 	      }
 	    }, {
-	      deep: this.deepWatch,
-	      immediate: true
+	      deep: this.deepWatch
 	    });
 
 	    // Display the map
@@ -41272,7 +41127,7 @@
 	};
 
 /***/ },
-/* 424 */
+/* 422 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -41375,7 +41230,7 @@
 	};
 
 /***/ },
-/* 425 */
+/* 423 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -41457,22 +41312,31 @@
 	};
 
 /***/ },
-/* 426 */
+/* 424 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(427),
-	  /* template */
-	  __webpack_require__(428),
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\infoWindow.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
-	if (Component.options.functional) {console.error("[vue-loader] infoWindow.vue: functional components are not supported with templates, they should use render functions.")}
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
+
+	/* script */
+	__vue_exports__ = __webpack_require__(425)
+
+	/* template */
+	var __vue_template__ = __webpack_require__(426)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\infoWindow.vue"
+	__vue_options__.render = __vue_template__.render
+	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
 
 	/* hot reload */
 	if (false) {(function () {
@@ -41481,17 +41345,18 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-f108426a", Component.options)
+	    hotAPI.createRecord("data-v-68ba2142", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-f108426a", Component.options)
+	    hotAPI.reload("data-v-68ba2142", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] infoWindow.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
-/* 427 */
+/* 425 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -41619,7 +41484,7 @@
 	};
 
 /***/ },
-/* 428 */
+/* 426 */
 /***/ function(module, exports, __webpack_require__) {
 
 	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
@@ -41635,31 +41500,39 @@
 	if (false) {
 	  module.hot.accept()
 	  if (module.hot.data) {
-	     require("vue-hot-reload-api").rerender("data-v-f108426a", module.exports)
+	     require("vue-hot-reload-api").rerender("data-v-68ba2142", module.exports)
 	  }
 	}
 
 /***/ },
-/* 429 */
+/* 427 */
 /***/ function(module, exports, __webpack_require__) {
 
-	
-	/* styles */
-	__webpack_require__(430)
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(432),
-	  /* template */
-	  __webpack_require__(433),
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\streetViewPanorama.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
-	if (Component.options.functional) {console.error("[vue-loader] streetViewPanorama.vue: functional components are not supported with templates, they should use render functions.")}
+	/* styles */
+	__webpack_require__(428)
+
+	/* script */
+	__vue_exports__ = __webpack_require__(430)
+
+	/* template */
+	var __vue_template__ = __webpack_require__(431)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\streetViewPanorama.vue"
+	__vue_options__.render = __vue_template__.render
+	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
 
 	/* hot reload */
 	if (false) {(function () {
@@ -41668,43 +41541,44 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-1f6847ea", Component.options)
+	    hotAPI.createRecord("data-v-73142361", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-1f6847ea", Component.options)
+	    hotAPI.reload("data-v-73142361", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] streetViewPanorama.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
-/* 430 */
+/* 428 */
 /***/ function(module, exports, __webpack_require__) {
 
 	// style-loader: Adds some css to the DOM by adding a <style> tag
 
 	// load the styles
-	var content = __webpack_require__(431);
+	var content = __webpack_require__(429);
 	if(typeof content === 'string') content = [[module.id, content, '']];
-	if(content.locals) module.exports = content.locals;
 	// add the styles to the DOM
-	var update = __webpack_require__(402)("05716da8", content, false);
+	var update = __webpack_require__(402)(content, {});
+	if(content.locals) module.exports = content.locals;
 	// Hot Module Replacement
 	if(false) {
-	 // When the styles change, update the <style> tags
-	 if(!content.locals) {
-	   module.hot.accept("!!../../../css-loader/index.js!../../../vue-loader/lib/style-rewriter.js?id=data-v-1f6847ea!../../../vue-loader/lib/selector.js?type=styles&index=0!./streetViewPanorama.vue", function() {
-	     var newContent = require("!!../../../css-loader/index.js!../../../vue-loader/lib/style-rewriter.js?id=data-v-1f6847ea!../../../vue-loader/lib/selector.js?type=styles&index=0!./streetViewPanorama.vue");
-	     if(typeof newContent === 'string') newContent = [[module.id, newContent, '']];
-	     update(newContent);
-	   });
-	 }
-	 // When the module is disposed, remove the <style> tags
-	 module.hot.dispose(function() { update(); });
+		// When the styles change, update the <style> tags
+		if(!content.locals) {
+			module.hot.accept("!!./../../../css-loader/index.js!./../../../vue-loader/lib/style-rewriter.js?id=data-v-73142361!./../../../vue-loader/lib/selector.js?type=styles&index=0!./streetViewPanorama.vue", function() {
+				var newContent = require("!!./../../../css-loader/index.js!./../../../vue-loader/lib/style-rewriter.js?id=data-v-73142361!./../../../vue-loader/lib/selector.js?type=styles&index=0!./streetViewPanorama.vue");
+				if(typeof newContent === 'string') newContent = [[module.id, newContent, '']];
+				update(newContent);
+			});
+		}
+		// When the module is disposed, remove the <style> tags
+		module.hot.dispose(function() { update(); });
 	}
 
 /***/ },
-/* 431 */
+/* 429 */
 /***/ function(module, exports, __webpack_require__) {
 
 	exports = module.exports = __webpack_require__(401)();
@@ -41718,7 +41592,7 @@
 
 
 /***/ },
-/* 432 */
+/* 430 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -41751,11 +41625,11 @@
 
 	var _getPropsValuesMixin2 = _interopRequireDefault(_getPropsValuesMixin);
 
-	var _mountableMixin = __webpack_require__(406);
+	var _mountableMixin = __webpack_require__(404);
 
 	var _mountableMixin2 = _interopRequireDefault(_mountableMixin);
 
-	var _latlngChangedHandler = __webpack_require__(407);
+	var _latlngChangedHandler = __webpack_require__(405);
 
 	var _latlngChangedHandler2 = _interopRequireDefault(_latlngChangedHandler);
 
@@ -41872,7 +41746,7 @@
 	};
 
 /***/ },
-/* 433 */
+/* 431 */
 /***/ function(module, exports, __webpack_require__) {
 
 	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
@@ -41887,27 +41761,36 @@
 	if (false) {
 	  module.hot.accept()
 	  if (module.hot.data) {
-	     require("vue-hot-reload-api").rerender("data-v-1f6847ea", module.exports)
+	     require("vue-hot-reload-api").rerender("data-v-73142361", module.exports)
 	  }
 	}
 
 /***/ },
-/* 434 */
+/* 432 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(435),
-	  /* template */
-	  __webpack_require__(437),
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\placeInput.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
-	if (Component.options.functional) {console.error("[vue-loader] placeInput.vue: functional components are not supported with templates, they should use render functions.")}
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
+
+	/* script */
+	__vue_exports__ = __webpack_require__(433)
+
+	/* template */
+	var __vue_template__ = __webpack_require__(435)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\placeInput.vue"
+	__vue_options__.render = __vue_template__.render
+	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
 
 	/* hot reload */
 	if (false) {(function () {
@@ -41916,17 +41799,18 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-0ea99d10", Component.options)
+	    hotAPI.createRecord("data-v-203040f2", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-0ea99d10", Component.options)
+	    hotAPI.reload("data-v-203040f2", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] placeInput.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
-/* 435 */
+/* 433 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -41947,7 +41831,7 @@
 
 	var _propsBinder2 = _interopRequireDefault(_propsBinder);
 
-	var _simulateArrowDown = __webpack_require__(436);
+	var _simulateArrowDown = __webpack_require__(434);
 
 	var _simulateArrowDown2 = _interopRequireDefault(_simulateArrowDown);
 
@@ -41957,7 +41841,7 @@
 
 	var _manager = __webpack_require__(303);
 
-	var _assert = __webpack_require__(411);
+	var _assert = __webpack_require__(409);
 
 	var _assert2 = _interopRequireDefault(_assert);
 
@@ -42041,7 +41925,7 @@
 	};
 
 /***/ },
-/* 436 */
+/* 434 */
 /***/ function(module, exports) {
 
 	'use strict';
@@ -42080,7 +41964,7 @@
 	};
 
 /***/ },
-/* 437 */
+/* 435 */
 /***/ function(module, exports, __webpack_require__) {
 
 	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
@@ -42101,27 +41985,36 @@
 	if (false) {
 	  module.hot.accept()
 	  if (module.hot.data) {
-	     require("vue-hot-reload-api").rerender("data-v-0ea99d10", module.exports)
+	     require("vue-hot-reload-api").rerender("data-v-203040f2", module.exports)
 	  }
 	}
 
 /***/ },
-/* 438 */
+/* 436 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(439),
-	  /* template */
-	  __webpack_require__(440),
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\autocomplete.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
-	if (Component.options.functional) {console.error("[vue-loader] autocomplete.vue: functional components are not supported with templates, they should use render functions.")}
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
+
+	/* script */
+	__vue_exports__ = __webpack_require__(437)
+
+	/* template */
+	var __vue_template__ = __webpack_require__(438)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\node_modules\\vue2-google-maps\\dist\\components\\autocomplete.vue"
+	__vue_options__.render = __vue_template__.render
+	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
 
 	/* hot reload */
 	if (false) {(function () {
@@ -42130,17 +42023,18 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-8c85e396", Component.options)
+	    hotAPI.createRecord("data-v-44748eec", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-8c85e396", Component.options)
+	    hotAPI.reload("data-v-44748eec", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] autocomplete.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
-/* 439 */
+/* 437 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -42161,7 +42055,7 @@
 
 	var _propsBinder2 = _interopRequireDefault(_propsBinder);
 
-	var _simulateArrowDown = __webpack_require__(436);
+	var _simulateArrowDown = __webpack_require__(434);
 
 	var _simulateArrowDown2 = _interopRequireDefault(_simulateArrowDown);
 
@@ -42171,7 +42065,7 @@
 
 	var _manager = __webpack_require__(303);
 
-	var _assert = __webpack_require__(411);
+	var _assert = __webpack_require__(409);
 
 	var _assert2 = _interopRequireDefault(_assert);
 
@@ -42250,7 +42144,7 @@
 	};
 
 /***/ },
-/* 440 */
+/* 438 */
 /***/ function(module, exports, __webpack_require__) {
 
 	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
@@ -42269,17 +42163,17 @@
 	if (false) {
 	  module.hot.accept()
 	  if (module.hot.data) {
-	     require("vue-hot-reload-api").rerender("data-v-8c85e396", module.exports)
+	     require("vue-hot-reload-api").rerender("data-v-44748eec", module.exports)
 	  }
 	}
 
 /***/ },
-/* 441 */
-/***/ function(module, exports, __webpack_require__) {
+/* 439 */
+/***/ function(module, exports) {
 
 	/*!
-	 * vue-resource v1.2.0
-	 * https://github.com/pagekit/vue-resource
+	 * vue-resource v1.0.3
+	 * https://github.com/vuejs/vue-resource
 	 * Released under the MIT License.
 	 */
 
@@ -42291,7 +42185,7 @@
 
 	var RESOLVED = 0;
 	var REJECTED = 1;
-	var PENDING  = 2;
+	var PENDING = 2;
 
 	function Promise$1(executor) {
 
@@ -42326,7 +42220,8 @@
 
 	Promise$1.all = function all(iterable) {
 	    return new Promise$1(function (resolve, reject) {
-	        var count = 0, result = [];
+	        var count = 0,
+	            result = [];
 
 	        if (iterable.length === 0) {
 	            resolve(result);
@@ -42378,7 +42273,6 @@
 	                        promise.resolve(x);
 	                    }
 	                    called = true;
-
 	                }, function (r) {
 	                    if (!called) {
 	                        promise.reject(r);
@@ -42528,33 +42422,25 @@
 	p.finally = function (callback) {
 
 	    return this.then(function (value) {
-	            callback.call(this);
-	            return value;
-	        }, function (reason) {
-	            callback.call(this);
-	            return Promise.reject(reason);
-	        }
-	    );
+	        callback.call(this);
+	        return value;
+	    }, function (reason) {
+	        callback.call(this);
+	        return Promise.reject(reason);
+	    });
 	};
 
 	/**
 	 * Utility functions.
 	 */
 
-	var debug = false;
-	var util = {};
-	var ref = {};
-	var hasOwnProperty = ref.hasOwnProperty;
+	var debug = false;var util = {};var slice = [].slice;
 
-	var ref$1 = [];
-	var slice = ref$1.slice;
 
-	var inBrowser = typeof window !== 'undefined';
-
-	var Util = function (Vue) {
+	function Util (Vue) {
 	    util = Vue.util;
 	    debug = Vue.config.debug || !Vue.config.silent;
-	};
+	}
 
 	function warn(msg) {
 	    if (typeof console !== 'undefined' && debug) {
@@ -42573,7 +42459,7 @@
 	}
 
 	function trim(str) {
-	    return str ? str.replace(/^\s*|\s*$/g, '') : '';
+	    return str.replace(/^\s*|\s*$/g, '');
 	}
 
 	function toLower(str) {
@@ -42590,7 +42476,9 @@
 	    return typeof val === 'string';
 	}
 
-
+	function isBoolean(val) {
+	    return val === true || val === false;
+	}
 
 	function isFunction(val) {
 	    return typeof val === 'function';
@@ -42631,20 +42519,20 @@
 	        opts = opts.call(obj);
 	    }
 
-	    return merge(fn.bind({$vm: obj, $options: opts}), fn, {$options: opts});
+	    return merge(fn.bind({ $vm: obj, $options: opts }), fn, { $options: opts });
 	}
 
 	function each(obj, iterator) {
 
 	    var i, key;
 
-	    if (isArray(obj)) {
+	    if (obj && typeof obj.length == 'number') {
 	        for (i = 0; i < obj.length; i++) {
 	            iterator.call(obj[i], obj[i], i);
 	        }
 	    } else if (isObject(obj)) {
 	        for (key in obj) {
-	            if (hasOwnProperty.call(obj, key)) {
+	            if (obj.hasOwnProperty(key)) {
 	                iterator.call(obj[key], obj[key], key);
 	            }
 	        }
@@ -42677,7 +42565,6 @@
 	                target[key] = source[key];
 	            }
 	        }
-
 	    });
 
 	    return target;
@@ -42714,26 +42601,28 @@
 	 * Root Prefix Transform.
 	 */
 
-	var root = function (options$$1, next) {
+	function root (options, next) {
 
-	    var url = next(options$$1);
+	    var url = next(options);
 
-	    if (isString(options$$1.root) && !url.match(/^(https?:)?\//)) {
-	        url = options$$1.root + '/' + url;
+	    if (isString(options.root) && !url.match(/^(https?:)?\//)) {
+	        url = options.root + '/' + url;
 	    }
 
 	    return url;
-	};
+	}
 
 	/**
 	 * Query Parameter Transform.
 	 */
 
-	var query = function (options$$1, next) {
+	function query (options, next) {
 
-	    var urlParams = Object.keys(Url.options.params), query = {}, url = next(options$$1);
+	    var urlParams = Object.keys(Url.options.params),
+	        query = {},
+	        url = next(options);
 
-	    each(options$$1.params, function (value, key) {
+	    each(options.params, function (value, key) {
 	        if (urlParams.indexOf(key) === -1) {
 	            query[key] = value;
 	        }
@@ -42746,7 +42635,7 @@
 	    }
 
 	    return url;
-	};
+	}
 
 	/**
 	 * URL Template v2.0.6 (https://github.com/bramstein/url-template)
@@ -42754,7 +42643,8 @@
 
 	function expand(url, params, variables) {
 
-	    var tmpl = parse(url), expanded = tmpl.expand(params);
+	    var tmpl = parse(url),
+	        expanded = tmpl.expand(params);
 
 	    if (variables) {
 	        variables.push.apply(variables, tmpl.vars);
@@ -42765,15 +42655,17 @@
 
 	function parse(template) {
 
-	    var operators = ['+', '#', '.', '/', ';', '?', '&'], variables = [];
+	    var operators = ['+', '#', '.', '/', ';', '?', '&'],
+	        variables = [];
 
 	    return {
 	        vars: variables,
-	        expand: function expand(context) {
+	        expand: function (context) {
 	            return template.replace(/\{([^\{\}]+)\}|([^\{\}]+)/g, function (_, expression, literal) {
 	                if (expression) {
 
-	                    var operator = null, values = [];
+	                    var operator = null,
+	                        values = [];
 
 	                    if (operators.indexOf(expression.charAt(0)) !== -1) {
 	                        operator = expression.charAt(0);
@@ -42800,7 +42692,6 @@
 	                    } else {
 	                        return values.join(',');
 	                    }
-
 	                } else {
 	                    return encodeReserved(literal);
 	                }
@@ -42811,7 +42702,8 @@
 
 	function getValues(context, operator, key, modifier) {
 
-	    var value = context[key], result = [];
+	    var value = context[key],
+	        result = [];
 
 	    if (isDefined(value) && value !== '') {
 	        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -42881,7 +42773,7 @@
 
 	function encodeValue(operator, value, key) {
 
-	    value = (operator === '+' || operator === '#') ? encodeReserved(value) : encodeURIComponent(value);
+	    value = operator === '+' || operator === '#' ? encodeReserved(value) : encodeURIComponent(value);
 
 	    if (key) {
 	        return encodeURIComponent(key) + '=' + value;
@@ -42903,36 +42795,42 @@
 	 * URL Template (RFC 6570) Transform.
 	 */
 
-	var template = function (options) {
+	function template (options) {
 
-	    var variables = [], url = expand(options.url, options.params, variables);
+	    var variables = [],
+	        url = expand(options.url, options.params, variables);
 
 	    variables.forEach(function (key) {
 	        delete options.params[key];
 	    });
 
 	    return url;
-	};
+	}
 
 	/**
 	 * Service for URL templating.
 	 */
 
+	var ie = document.documentMode;
+	var el = document.createElement('a');
+
 	function Url(url, params) {
 
-	    var self = this || {}, options$$1 = url, transform;
+	    var self = this || {},
+	        options = url,
+	        transform;
 
 	    if (isString(url)) {
-	        options$$1 = {url: url, params: params};
+	        options = { url: url, params: params };
 	    }
 
-	    options$$1 = merge({}, Url.options, self.$options, options$$1);
+	    options = merge({}, Url.options, self.$options, options);
 
 	    Url.transforms.forEach(function (handler) {
 	        transform = factory(handler, transform, self.$vm);
 	    });
 
-	    return transform(options$$1);
+	    return transform(options);
 	}
 
 	/**
@@ -42959,7 +42857,8 @@
 
 	Url.params = function (obj) {
 
-	    var params = [], escape = encodeURIComponent;
+	    var params = [],
+	        escape = encodeURIComponent;
 
 	    params.add = function (key, value) {
 
@@ -42987,9 +42886,7 @@
 
 	Url.parse = function (url) {
 
-	    var el = document.createElement('a');
-
-	    if (document.documentMode) {
+	    if (ie) {
 	        el.href = url;
 	        url = el.href;
 	    }
@@ -43009,14 +42906,16 @@
 	};
 
 	function factory(handler, next, vm) {
-	    return function (options$$1) {
-	        return handler.call(vm, options$$1, next);
+	    return function (options) {
+	        return handler.call(vm, options, next);
 	    };
 	}
 
 	function serialize(params, obj, scope) {
 
-	    var array = isArray(obj), plain = isPlainObject(obj), hash;
+	    var array = isArray(obj),
+	        plain = isPlainObject(obj),
+	        hash;
 
 	    each(obj, function (value, key) {
 
@@ -43040,11 +42939,12 @@
 	 * XDomain client (Internet Explorer).
 	 */
 
-	var xdrClient = function (request) {
+	function xdrClient (request) {
 	    return new PromiseObj(function (resolve) {
 
-	        var xdr = new XDomainRequest(), handler = function (ref) {
-	            var type = ref.type;
+	        var xdr = new XDomainRequest(),
+	            handler = function (_ref) {
+	            var type = _ref.type;
 
 
 	            var status = 0;
@@ -43055,63 +42955,64 @@
 	                status = 500;
 	            }
 
-	            resolve(request.respondWith(xdr.responseText, {status: status}));
+	            resolve(request.respondWith(xdr.responseText, { status: status }));
 	        };
 
-	        request.abort = function () { return xdr.abort(); };
+	        request.abort = function () {
+	            return xdr.abort();
+	        };
 
 	        xdr.open(request.method, request.getUrl());
-
-	        if (request.timeout) {
-	            xdr.timeout = request.timeout;
-	        }
-
+	        xdr.timeout = 0;
 	        xdr.onload = handler;
-	        xdr.onabort = handler;
 	        xdr.onerror = handler;
 	        xdr.ontimeout = handler;
 	        xdr.onprogress = function () {};
 	        xdr.send(request.getBody());
 	    });
-	};
+	}
 
 	/**
 	 * CORS Interceptor.
 	 */
 
-	var SUPPORTS_CORS = inBrowser && 'withCredentials' in new XMLHttpRequest();
+	var ORIGIN_URL = Url.parse(location.href);
+	var SUPPORTS_CORS = 'withCredentials' in new XMLHttpRequest();
 
-	var cors = function (request, next) {
+	function cors (request, next) {
 
-	    if (inBrowser) {
+	    if (!isBoolean(request.crossOrigin) && crossOrigin(request)) {
+	        request.crossOrigin = true;
+	    }
 
-	        var orgUrl = Url.parse(location.href);
-	        var reqUrl = Url.parse(request.getUrl());
+	    if (request.crossOrigin) {
 
-	        if (reqUrl.protocol !== orgUrl.protocol || reqUrl.host !== orgUrl.host) {
-
-	            request.crossOrigin = true;
-	            request.emulateHTTP = false;
-
-	            if (!SUPPORTS_CORS) {
-	                request.client = xdrClient;
-	            }
+	        if (!SUPPORTS_CORS) {
+	            request.client = xdrClient;
 	        }
+
+	        delete request.emulateHTTP;
 	    }
 
 	    next();
-	};
+	}
+
+	function crossOrigin(request) {
+
+	    var requestUrl = Url.parse(Url(request));
+
+	    return requestUrl.protocol !== ORIGIN_URL.protocol || requestUrl.host !== ORIGIN_URL.host;
+	}
 
 	/**
 	 * Body Interceptor.
 	 */
 
-	var body = function (request, next) {
+	function body (request, next) {
 
 	    if (isFormData(request.body)) {
 
 	        request.headers.delete('Content-Type');
-
 	    } else if (isObject(request.body) || isArray(request.body)) {
 
 	        if (request.emulateJSON) {
@@ -43125,58 +43026,49 @@
 	    next(function (response) {
 
 	        Object.defineProperty(response, 'data', {
-
-	            get: function get() {
+	            get: function () {
 	                return this.body;
 	            },
-
-	            set: function set(body) {
+	            set: function (body) {
 	                this.body = body;
 	            }
-
 	        });
 
 	        return response.bodyText ? when(response.text(), function (text) {
 
-	            var type = response.headers.get('Content-Type') || '';
+	            var type = response.headers.get('Content-Type');
 
-	            if (type.indexOf('application/json') === 0 || isJson(text)) {
+	            if (isString(type) && type.indexOf('application/json') === 0) {
 
 	                try {
 	                    response.body = JSON.parse(text);
 	                } catch (e) {
 	                    response.body = null;
 	                }
-
 	            } else {
 	                response.body = text;
 	            }
 
 	            return response;
-
 	        }) : response;
-
 	    });
-	};
-
-	function isJson(str) {
-
-	    var start = str.match(/^\[|^\{(?!\{)/), end = {'[': /]$/, '{': /}$/};
-
-	    return start && end[start[0]].test(str);
 	}
 
 	/**
-	 * JSONP client (Browser).
+	 * JSONP client.
 	 */
 
-	var jsonpClient = function (request) {
+	function jsonpClient (request) {
 	    return new PromiseObj(function (resolve) {
 
-	        var name = request.jsonp || 'callback', callback = request.jsonpCallback || '_jsonp' + Math.random().toString(36).substr(2), body = null, handler, script;
+	        var name = request.jsonp || 'callback',
+	            callback = '_jsonp' + Math.random().toString(36).substr(2),
+	            body = null,
+	            handler,
+	            script;
 
-	        handler = function (ref) {
-	            var type = ref.type;
+	        handler = function (_ref) {
+	            var type = _ref.type;
 
 
 	            var status = 0;
@@ -43187,27 +43079,17 @@
 	                status = 500;
 	            }
 
-	            if (status && window[callback]) {
-	                delete window[callback];
-	                document.body.removeChild(script);
-	            }
+	            resolve(request.respondWith(body, { status: status }));
 
-	            resolve(request.respondWith(body, {status: status}));
-	        };
-
-	        window[callback] = function (result) {
-	            body = JSON.stringify(result);
-	        };
-
-	        request.abort = function () {
-	            handler({type: 'abort'});
+	            delete window[callback];
+	            document.body.removeChild(script);
 	        };
 
 	        request.params[name] = callback;
 
-	        if (request.timeout) {
-	            setTimeout(request.abort, request.timeout);
-	        }
+	        window[callback] = function (result) {
+	            body = JSON.stringify(result);
+	        };
 
 	        script = document.createElement('script');
 	        script.src = request.getUrl();
@@ -43218,39 +43100,50 @@
 
 	        document.body.appendChild(script);
 	    });
-	};
+	}
 
 	/**
 	 * JSONP Interceptor.
 	 */
 
-	var jsonp = function (request, next) {
+	function jsonp (request, next) {
 
 	    if (request.method == 'JSONP') {
 	        request.client = jsonpClient;
 	    }
 
-	    next();
-	};
+	    next(function (response) {
+
+	        if (request.method == 'JSONP') {
+
+	            return when(response.json(), function (json) {
+
+	                response.body = json;
+
+	                return response;
+	            });
+	        }
+	    });
+	}
 
 	/**
 	 * Before Interceptor.
 	 */
 
-	var before = function (request, next) {
+	function before (request, next) {
 
 	    if (isFunction(request.before)) {
 	        request.before.call(this, request);
 	    }
 
 	    next();
-	};
+	}
 
 	/**
 	 * HTTP method override Interceptor.
 	 */
 
-	var method = function (request, next) {
+	function method (request, next) {
 
 	    if (request.emulateHTTP && /^(PUT|PATCH|DELETE)$/i.test(request.method)) {
 	        request.headers.set('X-HTTP-Method-Override', request.method);
@@ -43258,18 +43151,15 @@
 	    }
 
 	    next();
-	};
+	}
 
 	/**
 	 * Header Interceptor.
 	 */
 
-	var header = function (request, next) {
+	function header (request, next) {
 
-	    var headers = assign({}, Http.headers.common,
-	        !request.crossOrigin ? Http.headers.custom : {},
-	        Http.headers[toLower(request.method)]
-	    );
+	    var headers = assign({}, Http.headers.common, !request.crossOrigin ? Http.headers.custom : {}, Http.headers[toLower(request.method)]);
 
 	    each(headers, function (value, name) {
 	        if (!request.headers.has(name)) {
@@ -43278,25 +43168,42 @@
 	    });
 
 	    next();
-	};
+	}
 
 	/**
-	 * XMLHttp client (Browser).
+	 * Timeout Interceptor.
 	 */
 
-	var SUPPORTS_BLOB = typeof Blob !== 'undefined' && typeof FileReader !== 'undefined';
+	function timeout (request, next) {
 
-	var xhrClient = function (request) {
+	    var timeout;
+
+	    if (request.timeout) {
+	        timeout = setTimeout(function () {
+	            request.abort();
+	        }, request.timeout);
+	    }
+
+	    next(function (response) {
+
+	        clearTimeout(timeout);
+	    });
+	}
+
+	/**
+	 * XMLHttp client.
+	 */
+
+	function xhrClient (request) {
 	    return new PromiseObj(function (resolve) {
 
-	        var xhr = new XMLHttpRequest(), handler = function (event) {
+	        var xhr = new XMLHttpRequest(),
+	            handler = function (event) {
 
-	            var response = request.respondWith(
-	                'response' in xhr ? xhr.response : xhr.responseText, {
-	                    status: xhr.status === 1223 ? 204 : xhr.status, // IE9 status bug
-	                    statusText: xhr.status === 1223 ? 'No Content' : trim(xhr.statusText)
-	                }
-	            );
+	            var response = request.respondWith('response' in xhr ? xhr.response : xhr.responseText, {
+	                status: xhr.status === 1223 ? 204 : xhr.status, // IE9 status bug
+	                statusText: xhr.status === 1223 ? 'No Content' : trim(xhr.statusText)
+	            });
 
 	            each(trim(xhr.getAllResponseHeaders()).split('\n'), function (row) {
 	                response.headers.append(row.slice(0, row.indexOf(':')), row.slice(row.indexOf(':') + 1));
@@ -43305,7 +43212,9 @@
 	            resolve(response);
 	        };
 
-	        request.abort = function () { return xhr.abort(); };
+	        request.abort = function () {
+	            return xhr.abort();
+	        };
 
 	        if (request.progress) {
 	            if (request.method === 'GET') {
@@ -43317,78 +43226,34 @@
 
 	        xhr.open(request.method, request.getUrl(), true);
 
-	        if (request.timeout) {
-	            xhr.timeout = request.timeout;
+	        if ('responseType' in xhr) {
+	            xhr.responseType = 'blob';
 	        }
 
 	        if (request.credentials === true) {
 	            xhr.withCredentials = true;
 	        }
 
-	        if (!request.crossOrigin) {
-	            request.headers.set('X-Requested-With', 'XMLHttpRequest');
-	        }
-
-	        if ('responseType' in xhr && SUPPORTS_BLOB) {
-	            xhr.responseType = 'blob';
-	        }
-
 	        request.headers.forEach(function (value, name) {
 	            xhr.setRequestHeader(name, value);
 	        });
 
+	        xhr.timeout = 0;
 	        xhr.onload = handler;
-	        xhr.onabort = handler;
 	        xhr.onerror = handler;
-	        xhr.ontimeout = handler;
 	        xhr.send(request.getBody());
 	    });
-	};
-
-	/**
-	 * Http client (Node).
-	 */
-
-	var nodeClient = function (request) {
-
-	    var client = __webpack_require__(442);
-
-	    return new PromiseObj(function (resolve) {
-
-	        var url = request.getUrl();
-	        var body = request.getBody();
-	        var method = request.method;
-	        var headers = {}, handler;
-
-	        request.headers.forEach(function (value, name) {
-	            headers[name] = value;
-	        });
-
-	        client(url, {body: body, method: method, headers: headers}).then(handler = function (resp) {
-
-	            var response = request.respondWith(resp.body, {
-	                    status: resp.statusCode,
-	                    statusText: trim(resp.statusMessage)
-	                }
-	            );
-
-	            each(resp.headers, function (value, name) {
-	                response.headers.set(name, value);
-	            });
-
-	            resolve(response);
-
-	        }, function (error$$1) { return handler(error$$1.response); });
-	    });
-	};
+	}
 
 	/**
 	 * Base client.
 	 */
 
-	var Client = function (context) {
+	function Client (context) {
 
-	    var reqHandlers = [sendRequest], resHandlers = [], handler;
+	    var reqHandlers = [sendRequest],
+	        resHandlers = [],
+	        handler;
 
 	    if (!isObject(context)) {
 	        context = null;
@@ -43404,7 +43269,7 @@
 	                if (isFunction(handler)) {
 	                    handler.call(context, request, next);
 	                } else {
-	                    warn(("Invalid interceptor of type " + (typeof handler) + ", must be a function"));
+	                    warn('Invalid interceptor of type ' + typeof handler + ', must be a function');
 	                    next();
 	                }
 	            }
@@ -43414,7 +43279,6 @@
 	                if (isFunction(response)) {
 
 	                    resHandlers.unshift(response);
-
 	                } else if (isObject(response)) {
 
 	                    resHandlers.forEach(function (handler) {
@@ -43432,7 +43296,6 @@
 	            }
 
 	            exec();
-
 	        }, context);
 	    }
 
@@ -43441,73 +43304,85 @@
 	    };
 
 	    return Client;
-	};
+	}
 
 	function sendRequest(request, resolve) {
 
-	    var client = request.client || (inBrowser ? xhrClient : nodeClient);
+	    var client = request.client || xhrClient;
 
 	    resolve(client(request));
 	}
+
+	var classCallCheck = function (instance, Constructor) {
+	  if (!(instance instanceof Constructor)) {
+	    throw new TypeError("Cannot call a class as a function");
+	  }
+	};
 
 	/**
 	 * HTTP Headers.
 	 */
 
-	var Headers = function Headers(headers) {
-	    var this$1 = this;
+	var Headers = function () {
+	    function Headers(headers) {
+	        var _this = this;
+
+	        classCallCheck(this, Headers);
 
 
-	    this.map = {};
+	        this.map = {};
 
-	    each(headers, function (value, name) { return this$1.append(name, value); });
-	};
-
-	Headers.prototype.has = function has (name) {
-	    return getName(this.map, name) !== null;
-	};
-
-	Headers.prototype.get = function get (name) {
-
-	    var list = this.map[getName(this.map, name)];
-
-	    return list ? list[0] : null;
-	};
-
-	Headers.prototype.getAll = function getAll (name) {
-	    return this.map[getName(this.map, name)] || [];
-	};
-
-	Headers.prototype.set = function set (name, value) {
-	    this.map[normalizeName(getName(this.map, name) || name)] = [trim(value)];
-	};
-
-	Headers.prototype.append = function append (name, value){
-
-	    var list = this.getAll(name);
-
-	    if (list.length) {
-	        list.push(trim(value));
-	    } else {
-	        this.set(name, value);
+	        each(headers, function (value, name) {
+	            return _this.append(name, value);
+	        });
 	    }
-	};
 
-	Headers.prototype.delete = function delete$1 (name){
-	    delete this.map[getName(this.map, name)];
-	};
+	    Headers.prototype.has = function has(name) {
+	        return getName(this.map, name) !== null;
+	    };
 
-	Headers.prototype.deleteAll = function deleteAll (){
-	    this.map = {};
-	};
+	    Headers.prototype.get = function get(name) {
 
-	Headers.prototype.forEach = function forEach (callback, thisArg) {
-	        var this$1 = this;
+	        var list = this.map[getName(this.map, name)];
 
-	    each(this.map, function (list, name) {
-	        each(list, function (value) { return callback.call(thisArg, value, name, this$1); });
-	    });
-	};
+	        return list ? list[0] : null;
+	    };
+
+	    Headers.prototype.getAll = function getAll(name) {
+	        return this.map[getName(this.map, name)] || [];
+	    };
+
+	    Headers.prototype.set = function set(name, value) {
+	        this.map[normalizeName(getName(this.map, name) || name)] = [trim(value)];
+	    };
+
+	    Headers.prototype.append = function append(name, value) {
+
+	        var list = this.getAll(name);
+
+	        if (list.length) {
+	            list.push(trim(value));
+	        } else {
+	            this.set(name, value);
+	        }
+	    };
+
+	    Headers.prototype.delete = function _delete(name) {
+	        delete this.map[getName(this.map, name)];
+	    };
+
+	    Headers.prototype.forEach = function forEach(callback, thisArg) {
+	        var _this2 = this;
+
+	        each(this.map, function (list, name) {
+	            each(list, function (value) {
+	                return callback.call(thisArg, value, name, _this2);
+	            });
+	        });
+	    };
+
+	    return Headers;
+	}();
 
 	function getName(map, name) {
 	    return Object.keys(map).reduce(function (prev, curr) {
@@ -43528,45 +43403,51 @@
 	 * HTTP Response.
 	 */
 
-	var Response = function Response(body, ref) {
-	    var url = ref.url;
-	    var headers = ref.headers;
-	    var status = ref.status;
-	    var statusText = ref.statusText;
+	var Response = function () {
+	    function Response(body, _ref) {
+	        var url = _ref.url;
+	        var headers = _ref.headers;
+	        var status = _ref.status;
+	        var statusText = _ref.statusText;
+	        classCallCheck(this, Response);
 
 
-	    this.url = url;
-	    this.ok = status >= 200 && status < 300;
-	    this.status = status || 0;
-	    this.statusText = statusText || '';
-	    this.headers = new Headers(headers);
-	    this.body = body;
+	        this.url = url;
+	        this.ok = status >= 200 && status < 300;
+	        this.status = status || 0;
+	        this.statusText = statusText || '';
+	        this.headers = new Headers(headers);
+	        this.body = body;
 
-	    if (isString(body)) {
+	        if (isString(body)) {
 
-	        this.bodyText = body;
+	            this.bodyText = body;
+	        } else if (isBlob(body)) {
 
-	    } else if (isBlob(body)) {
+	            this.bodyBlob = body;
 
-	        this.bodyBlob = body;
-
-	        if (isBlobText(body)) {
-	            this.bodyText = blobText(body);
+	            if (isBlobText(body)) {
+	                this.bodyText = blobText(body);
+	            }
 	        }
 	    }
-	};
 
-	Response.prototype.blob = function blob () {
-	    return when(this.bodyBlob);
-	};
+	    Response.prototype.blob = function blob() {
+	        return when(this.bodyBlob);
+	    };
 
-	Response.prototype.text = function text () {
-	    return when(this.bodyText);
-	};
+	    Response.prototype.text = function text() {
+	        return when(this.bodyText);
+	    };
 
-	Response.prototype.json = function json () {
-	    return when(this.text(), function (text) { return JSON.parse(text); });
-	};
+	    Response.prototype.json = function json() {
+	        return when(this.text(), function (text) {
+	            return JSON.parse(text);
+	        });
+	    };
+
+	    return Response;
+	}();
 
 	function blobText(body) {
 	    return new PromiseObj(function (resolve) {
@@ -43577,7 +43458,6 @@
 	        reader.onload = function () {
 	            resolve(reader.result);
 	        };
-
 	    });
 	}
 
@@ -43589,53 +43469,60 @@
 	 * HTTP Request.
 	 */
 
-	var Request = function Request(options$$1) {
+	var Request = function () {
+	    function Request(options) {
+	        classCallCheck(this, Request);
 
-	    this.body = null;
-	    this.params = {};
 
-	    assign(this, options$$1, {
-	        method: toUpper(options$$1.method || 'GET')
-	    });
+	        this.body = null;
+	        this.params = {};
 
-	    if (!(this.headers instanceof Headers)) {
-	        this.headers = new Headers(this.headers);
+	        assign(this, options, {
+	            method: toUpper(options.method || 'GET')
+	        });
+
+	        if (!(this.headers instanceof Headers)) {
+	            this.headers = new Headers(this.headers);
+	        }
 	    }
-	};
 
-	Request.prototype.getUrl = function getUrl (){
-	    return Url(this);
-	};
+	    Request.prototype.getUrl = function getUrl() {
+	        return Url(this);
+	    };
 
-	Request.prototype.getBody = function getBody (){
-	    return this.body;
-	};
+	    Request.prototype.getBody = function getBody() {
+	        return this.body;
+	    };
 
-	Request.prototype.respondWith = function respondWith (body, options$$1) {
-	    return new Response(body, assign(options$$1 || {}, {url: this.getUrl()}));
-	};
+	    Request.prototype.respondWith = function respondWith(body, options) {
+	        return new Response(body, assign(options || {}, { url: this.getUrl() }));
+	    };
+
+	    return Request;
+	}();
 
 	/**
 	 * Service for sending network requests.
 	 */
 
-	var COMMON_HEADERS = {'Accept': 'application/json, text/plain, */*'};
-	var JSON_CONTENT_TYPE = {'Content-Type': 'application/json;charset=utf-8'};
+	var CUSTOM_HEADERS = { 'X-Requested-With': 'XMLHttpRequest' };
+	var COMMON_HEADERS = { 'Accept': 'application/json, text/plain, */*' };
+	var JSON_CONTENT_TYPE = { 'Content-Type': 'application/json;charset=utf-8' };
 
-	function Http(options$$1) {
+	function Http(options) {
 
-	    var self = this || {}, client = Client(self.$vm);
+	    var self = this || {},
+	        client = Client(self.$vm);
 
-	    defaults(options$$1 || {}, self.$options, Http.options);
+	    defaults(options || {}, self.$options, Http.options);
 
 	    Http.interceptors.forEach(function (handler) {
 	        client.use(handler);
 	    });
 
-	    return client(new Request(options$$1)).then(function (response) {
+	    return client(new Request(options)).then(function (response) {
 
 	        return response.ok ? response : PromiseObj.reject(response);
-
 	    }, function (response) {
 
 	        if (response instanceof Error) {
@@ -43653,44 +43540,40 @@
 	    post: JSON_CONTENT_TYPE,
 	    patch: JSON_CONTENT_TYPE,
 	    delete: JSON_CONTENT_TYPE,
-	    common: COMMON_HEADERS,
-	    custom: {}
+	    custom: CUSTOM_HEADERS,
+	    common: COMMON_HEADERS
 	};
 
-	Http.interceptors = [before, method, body, jsonp, header, cors];
+	Http.interceptors = [before, timeout, method, body, jsonp, header, cors];
 
-	['get', 'delete', 'head', 'jsonp'].forEach(function (method$$1) {
+	['get', 'delete', 'head', 'jsonp'].forEach(function (method) {
 
-	    Http[method$$1] = function (url, options$$1) {
-	        return this(assign(options$$1 || {}, {url: url, method: method$$1}));
+	    Http[method] = function (url, options) {
+	        return this(assign(options || {}, { url: url, method: method }));
 	    };
-
 	});
 
-	['post', 'put', 'patch'].forEach(function (method$$1) {
+	['post', 'put', 'patch'].forEach(function (method) {
 
-	    Http[method$$1] = function (url, body$$1, options$$1) {
-	        return this(assign(options$$1 || {}, {url: url, method: method$$1, body: body$$1}));
+	    Http[method] = function (url, body, options) {
+	        return this(assign(options || {}, { url: url, method: method, body: body }));
 	    };
-
 	});
 
 	/**
 	 * Service for interacting with RESTful services.
 	 */
 
-	function Resource(url, params, actions, options$$1) {
+	function Resource(url, params, actions, options) {
 
-	    var self = this || {}, resource = {};
+	    var self = this || {},
+	        resource = {};
 
-	    actions = assign({},
-	        Resource.actions,
-	        actions
-	    );
+	    actions = assign({}, Resource.actions, actions);
 
 	    each(actions, function (action, name) {
 
-	        action = merge({url: url, params: assign({}, params)}, options$$1, action);
+	        action = merge({ url: url, params: assign({}, params) }, options, action);
 
 	        resource[name] = function () {
 	            return (self.$http || Http)(opts(action, arguments));
@@ -43702,7 +43585,9 @@
 
 	function opts(action, args) {
 
-	    var options$$1 = assign({}, action), params = {}, body;
+	    var options = assign({}, action),
+	        params = {},
+	        body;
 
 	    switch (args.length) {
 
@@ -43715,7 +43600,7 @@
 
 	        case 1:
 
-	            if (/^(POST|PUT|PATCH)$/i.test(options$$1.method)) {
+	            if (/^(POST|PUT|PATCH)$/i.test(options.method)) {
 	                body = args[0];
 	            } else {
 	                params = args[0];
@@ -43729,23 +43614,23 @@
 
 	        default:
 
-	            throw 'Expected up to 2 arguments [params, body], got ' + args.length + ' arguments';
+	            throw 'Expected up to 4 arguments [params, body], got ' + args.length + ' arguments';
 	    }
 
-	    options$$1.body = body;
-	    options$$1.params = assign({}, options$$1.params, params);
+	    options.body = body;
+	    options.params = assign({}, options.params, params);
 
-	    return options$$1;
+	    return options;
 	}
 
 	Resource.actions = {
 
-	    get: {method: 'GET'},
-	    save: {method: 'POST'},
-	    query: {method: 'GET'},
-	    update: {method: 'PUT'},
-	    remove: {method: 'DELETE'},
-	    delete: {method: 'DELETE'}
+	    get: { method: 'GET' },
+	    save: { method: 'POST' },
+	    query: { method: 'GET' },
+	    update: { method: 'PUT' },
+	    remove: { method: 'DELETE' },
+	    delete: { method: 'DELETE' }
 
 	};
 
@@ -43769,28 +43654,30 @@
 	    Object.defineProperties(Vue.prototype, {
 
 	        $url: {
-	            get: function get() {
+	            get: function () {
 	                return options(Vue.url, this, this.$options.url);
 	            }
 	        },
 
 	        $http: {
-	            get: function get() {
+	            get: function () {
 	                return options(Vue.http, this, this.$options.http);
 	            }
 	        },
 
 	        $resource: {
-	            get: function get() {
+	            get: function () {
 	                return Vue.resource.bind(this);
 	            }
 	        },
 
 	        $promise: {
-	            get: function get() {
-	                var this$1 = this;
+	            get: function () {
+	                var _this = this;
 
-	                return function (executor) { return new Vue.Promise(executor, this$1); };
+	                return function (executor) {
+	                    return new Vue.Promise(executor, _this);
+	                };
 	            }
 	        }
 
@@ -43803,25 +43690,18 @@
 
 	module.exports = plugin;
 
-
 /***/ },
-/* 442 */
-/***/ function(module, exports) {
-
-	/* (ignored) */
-
-/***/ },
-/* 443 */
+/* 440 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
 
-	exports.decode = exports.parse = __webpack_require__(444);
-	exports.encode = exports.stringify = __webpack_require__(445);
+	exports.decode = exports.parse = __webpack_require__(441);
+	exports.encode = exports.stringify = __webpack_require__(442);
 
 
 /***/ },
-/* 444 */
+/* 441 */
 /***/ function(module, exports) {
 
 	// Copyright Joyent, Inc. and other Node contributors.
@@ -43895,7 +43775,7 @@
 
 	    if (!hasOwnProperty(obj, k)) {
 	      obj[k] = v;
-	    } else if (Array.isArray(obj[k])) {
+	    } else if (isArray(obj[k])) {
 	      obj[k].push(v);
 	    } else {
 	      obj[k] = [obj[k], v];
@@ -43905,9 +43785,13 @@
 	  return obj;
 	};
 
+	var isArray = Array.isArray || function (xs) {
+	  return Object.prototype.toString.call(xs) === '[object Array]';
+	};
+
 
 /***/ },
-/* 445 */
+/* 442 */
 /***/ function(module, exports) {
 
 	// Copyright Joyent, Inc. and other Node contributors.
@@ -43957,10 +43841,10 @@
 	  }
 
 	  if (typeof obj === 'object') {
-	    return Object.keys(obj).map(function(k) {
+	    return map(objectKeys(obj), function(k) {
 	      var ks = encodeURIComponent(stringifyPrimitive(k)) + eq;
-	      if (Array.isArray(obj[k])) {
-	        return obj[k].map(function(v) {
+	      if (isArray(obj[k])) {
+	        return map(obj[k], function(v) {
 	          return ks + encodeURIComponent(stringifyPrimitive(v));
 	        }).join(sep);
 	      } else {
@@ -43975,9 +43859,30 @@
 	         encodeURIComponent(stringifyPrimitive(obj));
 	};
 
+	var isArray = Array.isArray || function (xs) {
+	  return Object.prototype.toString.call(xs) === '[object Array]';
+	};
+
+	function map (xs, f) {
+	  if (xs.map) return xs.map(f);
+	  var res = [];
+	  for (var i = 0; i < xs.length; i++) {
+	    res.push(f(xs[i], i));
+	  }
+	  return res;
+	}
+
+	var objectKeys = Object.keys || function (obj) {
+	  var res = [];
+	  for (var key in obj) {
+	    if (Object.prototype.hasOwnProperty.call(obj, key)) res.push(key);
+	  }
+	  return res;
+	};
+
 
 /***/ },
-/* 446 */
+/* 443 */
 /***/ function(module, exports, __webpack_require__) {
 
 	/* WEBPACK VAR INJECTION */(function(module) {//! moment.js
@@ -45794,7 +45699,7 @@
 	            module && module.exports) {
 	        try {
 	            oldLocale = globalLocale._abbr;
-	            __webpack_require__(447)("./" + name);
+	            __webpack_require__(444)("./" + name);
 	            // because defineLocale currently also sets the global locale, we
 	            // want to undo that for lazy loaded locales
 	            getSetGlobalLocale(oldLocale);
@@ -48285,226 +48190,226 @@
 	/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(301)(module)))
 
 /***/ },
-/* 447 */
+/* 444 */
 /***/ function(module, exports, __webpack_require__) {
 
 	var map = {
-		"./af": 448,
-		"./af.js": 448,
-		"./ar": 449,
-		"./ar-dz": 450,
-		"./ar-dz.js": 450,
-		"./ar-ly": 451,
-		"./ar-ly.js": 451,
-		"./ar-ma": 452,
-		"./ar-ma.js": 452,
-		"./ar-sa": 453,
-		"./ar-sa.js": 453,
-		"./ar-tn": 454,
-		"./ar-tn.js": 454,
-		"./ar.js": 449,
-		"./az": 455,
-		"./az.js": 455,
-		"./be": 456,
-		"./be.js": 456,
-		"./bg": 457,
-		"./bg.js": 457,
-		"./bn": 458,
-		"./bn.js": 458,
-		"./bo": 459,
-		"./bo.js": 459,
-		"./br": 460,
-		"./br.js": 460,
-		"./bs": 461,
-		"./bs.js": 461,
-		"./ca": 462,
-		"./ca.js": 462,
-		"./cs": 463,
-		"./cs.js": 463,
-		"./cv": 464,
-		"./cv.js": 464,
-		"./cy": 465,
-		"./cy.js": 465,
-		"./da": 466,
-		"./da.js": 466,
-		"./de": 467,
-		"./de-at": 468,
-		"./de-at.js": 468,
-		"./de.js": 467,
-		"./dv": 469,
-		"./dv.js": 469,
-		"./el": 470,
-		"./el.js": 470,
-		"./en-au": 471,
-		"./en-au.js": 471,
-		"./en-ca": 472,
-		"./en-ca.js": 472,
-		"./en-gb": 473,
-		"./en-gb.js": 473,
-		"./en-ie": 474,
-		"./en-ie.js": 474,
-		"./en-nz": 475,
-		"./en-nz.js": 475,
-		"./eo": 476,
-		"./eo.js": 476,
-		"./es": 477,
-		"./es-do": 478,
-		"./es-do.js": 478,
-		"./es.js": 477,
-		"./et": 479,
-		"./et.js": 479,
-		"./eu": 480,
-		"./eu.js": 480,
-		"./fa": 481,
-		"./fa.js": 481,
-		"./fi": 482,
-		"./fi.js": 482,
-		"./fo": 483,
-		"./fo.js": 483,
-		"./fr": 484,
-		"./fr-ca": 485,
-		"./fr-ca.js": 485,
-		"./fr-ch": 486,
-		"./fr-ch.js": 486,
-		"./fr.js": 484,
-		"./fy": 487,
-		"./fy.js": 487,
-		"./gd": 488,
-		"./gd.js": 488,
-		"./gl": 489,
-		"./gl.js": 489,
-		"./he": 490,
-		"./he.js": 490,
-		"./hi": 491,
-		"./hi.js": 491,
-		"./hr": 492,
-		"./hr.js": 492,
-		"./hu": 493,
-		"./hu.js": 493,
-		"./hy-am": 494,
-		"./hy-am.js": 494,
-		"./id": 495,
-		"./id.js": 495,
-		"./is": 496,
-		"./is.js": 496,
-		"./it": 497,
-		"./it.js": 497,
-		"./ja": 498,
-		"./ja.js": 498,
-		"./jv": 499,
-		"./jv.js": 499,
-		"./ka": 500,
-		"./ka.js": 500,
-		"./kk": 501,
-		"./kk.js": 501,
-		"./km": 502,
-		"./km.js": 502,
-		"./ko": 503,
-		"./ko.js": 503,
-		"./ky": 504,
-		"./ky.js": 504,
-		"./lb": 505,
-		"./lb.js": 505,
-		"./lo": 506,
-		"./lo.js": 506,
-		"./lt": 507,
-		"./lt.js": 507,
-		"./lv": 508,
-		"./lv.js": 508,
-		"./me": 509,
-		"./me.js": 509,
-		"./mi": 510,
-		"./mi.js": 510,
-		"./mk": 511,
-		"./mk.js": 511,
-		"./ml": 512,
-		"./ml.js": 512,
-		"./mr": 513,
-		"./mr.js": 513,
-		"./ms": 514,
-		"./ms-my": 515,
-		"./ms-my.js": 515,
-		"./ms.js": 514,
-		"./my": 516,
-		"./my.js": 516,
-		"./nb": 517,
-		"./nb.js": 517,
-		"./ne": 518,
-		"./ne.js": 518,
-		"./nl": 519,
-		"./nl-be": 520,
-		"./nl-be.js": 520,
-		"./nl.js": 519,
-		"./nn": 521,
-		"./nn.js": 521,
-		"./pa-in": 522,
-		"./pa-in.js": 522,
-		"./pl": 523,
-		"./pl.js": 523,
-		"./pt": 524,
-		"./pt-br": 525,
-		"./pt-br.js": 525,
-		"./pt.js": 524,
-		"./ro": 526,
-		"./ro.js": 526,
-		"./ru": 527,
-		"./ru.js": 527,
-		"./se": 528,
-		"./se.js": 528,
-		"./si": 529,
-		"./si.js": 529,
-		"./sk": 530,
-		"./sk.js": 530,
-		"./sl": 531,
-		"./sl.js": 531,
-		"./sq": 532,
-		"./sq.js": 532,
-		"./sr": 533,
-		"./sr-cyrl": 534,
-		"./sr-cyrl.js": 534,
-		"./sr.js": 533,
-		"./ss": 535,
-		"./ss.js": 535,
-		"./sv": 536,
-		"./sv.js": 536,
-		"./sw": 537,
-		"./sw.js": 537,
-		"./ta": 538,
-		"./ta.js": 538,
-		"./te": 539,
-		"./te.js": 539,
-		"./tet": 540,
-		"./tet.js": 540,
-		"./th": 541,
-		"./th.js": 541,
-		"./tl-ph": 542,
-		"./tl-ph.js": 542,
-		"./tlh": 543,
-		"./tlh.js": 543,
-		"./tr": 544,
-		"./tr.js": 544,
-		"./tzl": 545,
-		"./tzl.js": 545,
-		"./tzm": 546,
-		"./tzm-latn": 547,
-		"./tzm-latn.js": 547,
-		"./tzm.js": 546,
-		"./uk": 548,
-		"./uk.js": 548,
-		"./uz": 549,
-		"./uz.js": 549,
-		"./vi": 550,
-		"./vi.js": 550,
-		"./x-pseudo": 551,
-		"./x-pseudo.js": 551,
-		"./yo": 552,
-		"./yo.js": 552,
-		"./zh-cn": 553,
-		"./zh-cn.js": 553,
-		"./zh-hk": 554,
-		"./zh-hk.js": 554,
-		"./zh-tw": 555,
-		"./zh-tw.js": 555
+		"./af": 445,
+		"./af.js": 445,
+		"./ar": 446,
+		"./ar-dz": 447,
+		"./ar-dz.js": 447,
+		"./ar-ly": 448,
+		"./ar-ly.js": 448,
+		"./ar-ma": 449,
+		"./ar-ma.js": 449,
+		"./ar-sa": 450,
+		"./ar-sa.js": 450,
+		"./ar-tn": 451,
+		"./ar-tn.js": 451,
+		"./ar.js": 446,
+		"./az": 452,
+		"./az.js": 452,
+		"./be": 453,
+		"./be.js": 453,
+		"./bg": 454,
+		"./bg.js": 454,
+		"./bn": 455,
+		"./bn.js": 455,
+		"./bo": 456,
+		"./bo.js": 456,
+		"./br": 457,
+		"./br.js": 457,
+		"./bs": 458,
+		"./bs.js": 458,
+		"./ca": 459,
+		"./ca.js": 459,
+		"./cs": 460,
+		"./cs.js": 460,
+		"./cv": 461,
+		"./cv.js": 461,
+		"./cy": 462,
+		"./cy.js": 462,
+		"./da": 463,
+		"./da.js": 463,
+		"./de": 464,
+		"./de-at": 465,
+		"./de-at.js": 465,
+		"./de.js": 464,
+		"./dv": 466,
+		"./dv.js": 466,
+		"./el": 467,
+		"./el.js": 467,
+		"./en-au": 468,
+		"./en-au.js": 468,
+		"./en-ca": 469,
+		"./en-ca.js": 469,
+		"./en-gb": 470,
+		"./en-gb.js": 470,
+		"./en-ie": 471,
+		"./en-ie.js": 471,
+		"./en-nz": 472,
+		"./en-nz.js": 472,
+		"./eo": 473,
+		"./eo.js": 473,
+		"./es": 474,
+		"./es-do": 475,
+		"./es-do.js": 475,
+		"./es.js": 474,
+		"./et": 476,
+		"./et.js": 476,
+		"./eu": 477,
+		"./eu.js": 477,
+		"./fa": 478,
+		"./fa.js": 478,
+		"./fi": 479,
+		"./fi.js": 479,
+		"./fo": 480,
+		"./fo.js": 480,
+		"./fr": 481,
+		"./fr-ca": 482,
+		"./fr-ca.js": 482,
+		"./fr-ch": 483,
+		"./fr-ch.js": 483,
+		"./fr.js": 481,
+		"./fy": 484,
+		"./fy.js": 484,
+		"./gd": 485,
+		"./gd.js": 485,
+		"./gl": 486,
+		"./gl.js": 486,
+		"./he": 487,
+		"./he.js": 487,
+		"./hi": 488,
+		"./hi.js": 488,
+		"./hr": 489,
+		"./hr.js": 489,
+		"./hu": 490,
+		"./hu.js": 490,
+		"./hy-am": 491,
+		"./hy-am.js": 491,
+		"./id": 492,
+		"./id.js": 492,
+		"./is": 493,
+		"./is.js": 493,
+		"./it": 494,
+		"./it.js": 494,
+		"./ja": 495,
+		"./ja.js": 495,
+		"./jv": 496,
+		"./jv.js": 496,
+		"./ka": 497,
+		"./ka.js": 497,
+		"./kk": 498,
+		"./kk.js": 498,
+		"./km": 499,
+		"./km.js": 499,
+		"./ko": 500,
+		"./ko.js": 500,
+		"./ky": 501,
+		"./ky.js": 501,
+		"./lb": 502,
+		"./lb.js": 502,
+		"./lo": 503,
+		"./lo.js": 503,
+		"./lt": 504,
+		"./lt.js": 504,
+		"./lv": 505,
+		"./lv.js": 505,
+		"./me": 506,
+		"./me.js": 506,
+		"./mi": 507,
+		"./mi.js": 507,
+		"./mk": 508,
+		"./mk.js": 508,
+		"./ml": 509,
+		"./ml.js": 509,
+		"./mr": 510,
+		"./mr.js": 510,
+		"./ms": 511,
+		"./ms-my": 512,
+		"./ms-my.js": 512,
+		"./ms.js": 511,
+		"./my": 513,
+		"./my.js": 513,
+		"./nb": 514,
+		"./nb.js": 514,
+		"./ne": 515,
+		"./ne.js": 515,
+		"./nl": 516,
+		"./nl-be": 517,
+		"./nl-be.js": 517,
+		"./nl.js": 516,
+		"./nn": 518,
+		"./nn.js": 518,
+		"./pa-in": 519,
+		"./pa-in.js": 519,
+		"./pl": 520,
+		"./pl.js": 520,
+		"./pt": 521,
+		"./pt-br": 522,
+		"./pt-br.js": 522,
+		"./pt.js": 521,
+		"./ro": 523,
+		"./ro.js": 523,
+		"./ru": 524,
+		"./ru.js": 524,
+		"./se": 525,
+		"./se.js": 525,
+		"./si": 526,
+		"./si.js": 526,
+		"./sk": 527,
+		"./sk.js": 527,
+		"./sl": 528,
+		"./sl.js": 528,
+		"./sq": 529,
+		"./sq.js": 529,
+		"./sr": 530,
+		"./sr-cyrl": 531,
+		"./sr-cyrl.js": 531,
+		"./sr.js": 530,
+		"./ss": 532,
+		"./ss.js": 532,
+		"./sv": 533,
+		"./sv.js": 533,
+		"./sw": 534,
+		"./sw.js": 534,
+		"./ta": 535,
+		"./ta.js": 535,
+		"./te": 536,
+		"./te.js": 536,
+		"./tet": 537,
+		"./tet.js": 537,
+		"./th": 538,
+		"./th.js": 538,
+		"./tl-ph": 539,
+		"./tl-ph.js": 539,
+		"./tlh": 540,
+		"./tlh.js": 540,
+		"./tr": 541,
+		"./tr.js": 541,
+		"./tzl": 542,
+		"./tzl.js": 542,
+		"./tzm": 543,
+		"./tzm-latn": 544,
+		"./tzm-latn.js": 544,
+		"./tzm.js": 543,
+		"./uk": 545,
+		"./uk.js": 545,
+		"./uz": 546,
+		"./uz.js": 546,
+		"./vi": 547,
+		"./vi.js": 547,
+		"./x-pseudo": 548,
+		"./x-pseudo.js": 548,
+		"./yo": 549,
+		"./yo.js": 549,
+		"./zh-cn": 550,
+		"./zh-cn.js": 550,
+		"./zh-hk": 551,
+		"./zh-hk.js": 551,
+		"./zh-tw": 552,
+		"./zh-tw.js": 552
 	};
 	function webpackContext(req) {
 		return __webpack_require__(webpackContextResolve(req));
@@ -48517,11 +48422,11 @@
 	};
 	webpackContext.resolve = webpackContextResolve;
 	module.exports = webpackContext;
-	webpackContext.id = 447;
+	webpackContext.id = 444;
 
 
 /***/ },
-/* 448 */
+/* 445 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -48529,7 +48434,7 @@
 	//! author : Werner Mollentze : https://github.com/wernerm
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -48599,7 +48504,7 @@
 
 
 /***/ },
-/* 449 */
+/* 446 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -48609,7 +48514,7 @@
 	//! author : forabi https://github.com/forabi
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -48746,7 +48651,7 @@
 
 
 /***/ },
-/* 450 */
+/* 447 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -48754,7 +48659,7 @@
 	//! author : Noureddine LOUAHEDJ : https://github.com/noureddineme
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -48810,7 +48715,7 @@
 
 
 /***/ },
-/* 451 */
+/* 448 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -48818,7 +48723,7 @@
 	//! author : Ali Hmer: https://github.com/kikoanis
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -48941,7 +48846,7 @@
 
 
 /***/ },
-/* 452 */
+/* 449 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -48950,7 +48855,7 @@
 	//! author : Abdel Said : https://github.com/abdelsaid
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49006,7 +48911,7 @@
 
 
 /***/ },
-/* 453 */
+/* 450 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49014,7 +48919,7 @@
 	//! author : Suhail Alkowaileet : https://github.com/xsoh
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49116,7 +49021,7 @@
 
 
 /***/ },
-/* 454 */
+/* 451 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49124,7 +49029,7 @@
 	//! author : Nader Toukabri : https://github.com/naderio
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49180,7 +49085,7 @@
 
 
 /***/ },
-/* 455 */
+/* 452 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49188,7 +49093,7 @@
 	//! author : topchiyev : https://github.com/topchiyev
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49290,7 +49195,7 @@
 
 
 /***/ },
-/* 456 */
+/* 453 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49300,7 +49205,7 @@
 	//! Author : Menelion Elensúle : https://github.com/Oire
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49429,7 +49334,7 @@
 
 
 /***/ },
-/* 457 */
+/* 454 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49437,7 +49342,7 @@
 	//! author : Krasen Borisov : https://github.com/kraz
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49524,7 +49429,7 @@
 
 
 /***/ },
-/* 458 */
+/* 455 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49532,7 +49437,7 @@
 	//! author : Kaushik Gandhi : https://github.com/kaushikgandhi
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49648,7 +49553,7 @@
 
 
 /***/ },
-/* 459 */
+/* 456 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49656,7 +49561,7 @@
 	//! author : Thupten N. Chakrishar : https://github.com/vajradog
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49772,7 +49677,7 @@
 
 
 /***/ },
-/* 460 */
+/* 457 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49780,7 +49685,7 @@
 	//! author : Jean-Baptiste Le Duigou : https://github.com/jbleduigou
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -49885,7 +49790,7 @@
 
 
 /***/ },
-/* 461 */
+/* 458 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -49894,7 +49799,7 @@
 	//! based on (hr) translation by Bojan Marković
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50033,7 +49938,7 @@
 
 
 /***/ },
-/* 462 */
+/* 459 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50041,7 +49946,7 @@
 	//! author : Juan G. Hurtado : https://github.com/juanghurtado
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50119,7 +50024,7 @@
 
 
 /***/ },
-/* 463 */
+/* 460 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50127,7 +50032,7 @@
 	//! author : petrbela : https://github.com/petrbela
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50296,7 +50201,7 @@
 
 
 /***/ },
-/* 464 */
+/* 461 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50304,7 +50209,7 @@
 	//! author : Anatoly Mironov : https://github.com/mirontoli
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50364,7 +50269,7 @@
 
 
 /***/ },
-/* 465 */
+/* 462 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50373,7 +50278,7 @@
 	//! author : https://github.com/ryangreaves
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50450,7 +50355,7 @@
 
 
 /***/ },
-/* 466 */
+/* 463 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50458,7 +50363,7 @@
 	//! author : Ulrik Nielsen : https://github.com/mrbase
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50515,7 +50420,7 @@
 
 
 /***/ },
-/* 467 */
+/* 464 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50525,7 +50430,7 @@
 	//! author : Mikolaj Dadela : https://github.com/mik01aj
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50598,7 +50503,7 @@
 
 
 /***/ },
-/* 468 */
+/* 465 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50609,7 +50514,7 @@
 	//! author : Mikolaj Dadela : https://github.com/mik01aj
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50682,7 +50587,7 @@
 
 
 /***/ },
-/* 469 */
+/* 466 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50690,7 +50595,7 @@
 	//! author : Jawish Hameed : https://github.com/jawish
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50787,7 +50692,7 @@
 
 
 /***/ },
-/* 470 */
+/* 467 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50795,7 +50700,7 @@
 	//! author : Aggelos Karalias : https://github.com/mehiel
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50890,7 +50795,7 @@
 
 
 /***/ },
-/* 471 */
+/* 468 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50898,7 +50803,7 @@
 	//! author : Jared Morse : https://github.com/jarcoal
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -50962,7 +50867,7 @@
 
 
 /***/ },
-/* 472 */
+/* 469 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -50970,7 +50875,7 @@
 	//! author : Jonathan Abourbih : https://github.com/jonbca
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51030,7 +50935,7 @@
 
 
 /***/ },
-/* 473 */
+/* 470 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51038,7 +50943,7 @@
 	//! author : Chris Gedrim : https://github.com/chrisgedrim
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51102,7 +51007,7 @@
 
 
 /***/ },
-/* 474 */
+/* 471 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51110,7 +51015,7 @@
 	//! author : Chris Cartlidge : https://github.com/chriscartlidge
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51174,7 +51079,7 @@
 
 
 /***/ },
-/* 475 */
+/* 472 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51182,7 +51087,7 @@
 	//! author : Luke McGregor : https://github.com/lukemcgregor
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51246,7 +51151,7 @@
 
 
 /***/ },
-/* 476 */
+/* 473 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51256,7 +51161,7 @@
 	//!          Se ne, bonvolu korekti kaj avizi min por ke mi povas lerni!
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51324,7 +51229,7 @@
 
 
 /***/ },
-/* 477 */
+/* 474 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51332,7 +51237,7 @@
 	//! author : Julio Napurí : https://github.com/julionc
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51410,14 +51315,14 @@
 
 
 /***/ },
-/* 478 */
+/* 475 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
 	//! locale : Spanish (Dominican Republic) [es-do]
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51495,7 +51400,7 @@
 
 
 /***/ },
-/* 479 */
+/* 476 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51504,7 +51409,7 @@
 	//! improvements : Illimar Tambek : https://github.com/ragulka
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51580,7 +51485,7 @@
 
 
 /***/ },
-/* 480 */
+/* 477 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51588,7 +51493,7 @@
 	//! author : Eneko Illarramendi : https://github.com/eillarra
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51651,7 +51556,7 @@
 
 
 /***/ },
-/* 481 */
+/* 478 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51659,7 +51564,7 @@
 	//! author : Ebrahim Byagowi : https://github.com/ebraminio
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51763,7 +51668,7 @@
 
 
 /***/ },
-/* 482 */
+/* 479 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51771,7 +51676,7 @@
 	//! author : Tarmo Aidantausta : https://github.com/bleadof
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51875,7 +51780,7 @@
 
 
 /***/ },
-/* 483 */
+/* 480 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51883,7 +51788,7 @@
 	//! author : Ragnar Johannesen : https://github.com/ragnar123
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -51940,7 +51845,7 @@
 
 
 /***/ },
-/* 484 */
+/* 481 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -51948,7 +51853,7 @@
 	//! author : John Fischer : https://github.com/jfroffice
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52009,7 +51914,7 @@
 
 
 /***/ },
-/* 485 */
+/* 482 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52017,7 +51922,7 @@
 	//! author : Jonathan Abourbih : https://github.com/jonbca
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52074,7 +51979,7 @@
 
 
 /***/ },
-/* 486 */
+/* 483 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52082,7 +51987,7 @@
 	//! author : Gaspard Bucher : https://github.com/gaspard
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52143,7 +52048,7 @@
 
 
 /***/ },
-/* 487 */
+/* 484 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52151,7 +52056,7 @@
 	//! author : Robin van der Vliet : https://github.com/robin0van0der0v
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52221,7 +52126,7 @@
 
 
 /***/ },
-/* 488 */
+/* 485 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52229,7 +52134,7 @@
 	//! author : Jon Ashdown : https://github.com/jonashdown
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52302,7 +52207,7 @@
 
 
 /***/ },
-/* 489 */
+/* 486 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52310,7 +52215,7 @@
 	//! author : Juan G. Hurtado : https://github.com/juanghurtado
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52384,7 +52289,7 @@
 
 
 /***/ },
-/* 490 */
+/* 487 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52394,7 +52299,7 @@
 	//! author : Tal Ater : https://github.com/TalAter
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52488,7 +52393,7 @@
 
 
 /***/ },
-/* 491 */
+/* 488 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52496,7 +52401,7 @@
 	//! author : Mayank Singhal : https://github.com/mayanksinghal
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52617,7 +52522,7 @@
 
 
 /***/ },
-/* 492 */
+/* 489 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52625,7 +52530,7 @@
 	//! author : Bojan Marković : https://github.com/bmarkovic
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52767,7 +52672,7 @@
 
 
 /***/ },
-/* 493 */
+/* 490 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52775,7 +52680,7 @@
 	//! author : Adam Brunner : https://github.com/adambrunner
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52881,7 +52786,7 @@
 
 
 /***/ },
-/* 494 */
+/* 491 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52889,7 +52794,7 @@
 	//! author : Armendarabyan : https://github.com/armendarabyan
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -52981,7 +52886,7 @@
 
 
 /***/ },
-/* 495 */
+/* 492 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -52990,7 +52895,7 @@
 	//! reference: http://id.wikisource.org/wiki/Pedoman_Umum_Ejaan_Bahasa_Indonesia_yang_Disempurnakan
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53069,7 +52974,7 @@
 
 
 /***/ },
-/* 496 */
+/* 493 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53077,7 +52982,7 @@
 	//! author : Hinrik Örn Sigurðsson : https://github.com/hinrik
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53201,7 +53106,7 @@
 
 
 /***/ },
-/* 497 */
+/* 494 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53210,7 +53115,7 @@
 	//! author: Mattia Larentis: https://github.com/nostalgiaz
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53276,7 +53181,7 @@
 
 
 /***/ },
-/* 498 */
+/* 495 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53284,7 +53189,7 @@
 	//! author : LI Long : https://github.com/baryon
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53357,7 +53262,7 @@
 
 
 /***/ },
-/* 499 */
+/* 496 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53366,7 +53271,7 @@
 	//! reference: http://jv.wikipedia.org/wiki/Basa_Jawa
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53445,7 +53350,7 @@
 
 
 /***/ },
-/* 500 */
+/* 497 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53453,7 +53358,7 @@
 	//! author : Irakli Janiashvili : https://github.com/irakli-janiashvili
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53539,7 +53444,7 @@
 
 
 /***/ },
-/* 501 */
+/* 498 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53547,7 +53452,7 @@
 	//! authors : Nurlan Rakhimzhanov : https://github.com/nurlan
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53631,7 +53536,7 @@
 
 
 /***/ },
-/* 502 */
+/* 499 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53639,7 +53544,7 @@
 	//! author : Kruy Vanna : https://github.com/kruyvanna
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53694,7 +53599,7 @@
 
 
 /***/ },
-/* 503 */
+/* 500 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53703,7 +53608,7 @@
 	//! author : Jeeeyul Lee <jeeeyul@gmail.com>
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53764,7 +53669,7 @@
 
 
 /***/ },
-/* 504 */
+/* 501 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53772,7 +53677,7 @@
 	//! author : Chyngyz Arystan uulu : https://github.com/chyngyz
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53857,7 +53762,7 @@
 
 
 /***/ },
-/* 505 */
+/* 502 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -53866,7 +53771,7 @@
 	//! author : David Raison : https://github.com/kwisatz
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -53999,7 +53904,7 @@
 
 
 /***/ },
-/* 506 */
+/* 503 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54007,7 +53912,7 @@
 	//! author : Ryan Hart : https://github.com/ryanhart2
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54074,7 +53979,7 @@
 
 
 /***/ },
-/* 507 */
+/* 504 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54082,7 +53987,7 @@
 	//! author : Mindaugas Mozūras : https://github.com/mmozuras
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54196,7 +54101,7 @@
 
 
 /***/ },
-/* 508 */
+/* 505 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54205,7 +54110,7 @@
 	//! author : Jānis Elmeris : https://github.com/JanisE
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54298,7 +54203,7 @@
 
 
 /***/ },
-/* 509 */
+/* 506 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54306,7 +54211,7 @@
 	//! author : Miodrag Nikač <miodrag@restartit.me> : https://github.com/miodragnikac
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54414,7 +54319,7 @@
 
 
 /***/ },
-/* 510 */
+/* 507 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54422,7 +54327,7 @@
 	//! author : John Corrigan <robbiecloset@gmail.com> : https://github.com/johnideal
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54483,7 +54388,7 @@
 
 
 /***/ },
-/* 511 */
+/* 508 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54491,7 +54396,7 @@
 	//! author : Borislav Mickov : https://github.com/B0k0
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54578,7 +54483,7 @@
 
 
 /***/ },
-/* 512 */
+/* 509 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54586,7 +54491,7 @@
 	//! author : Floyd Pink : https://github.com/floydpink
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54664,7 +54569,7 @@
 
 
 /***/ },
-/* 513 */
+/* 510 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54673,7 +54578,7 @@
 	//! author : Vivek Athalye : https://github.com/vnathalye
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54828,7 +54733,7 @@
 
 
 /***/ },
-/* 514 */
+/* 511 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54836,7 +54741,7 @@
 	//! author : Weldan Jamili : https://github.com/weldan
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -54915,7 +54820,7 @@
 
 
 /***/ },
-/* 515 */
+/* 512 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -54924,7 +54829,7 @@
 	//! author : Weldan Jamili : https://github.com/weldan
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55003,7 +54908,7 @@
 
 
 /***/ },
-/* 516 */
+/* 513 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55013,7 +54918,7 @@
 	//! author : Tin Aung Lin : https://github.com/thanyawzinmin
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55104,7 +55009,7 @@
 
 
 /***/ },
-/* 517 */
+/* 514 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55113,7 +55018,7 @@
 	//!           Sigurd Gartmann : https://github.com/sigurdga
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55172,7 +55077,7 @@
 
 
 /***/ },
-/* 518 */
+/* 515 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55180,7 +55085,7 @@
 	//! author : suvash : https://github.com/suvash
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55300,7 +55205,7 @@
 
 
 /***/ },
-/* 519 */
+/* 516 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55309,7 +55214,7 @@
 	//! author : Jacob Middag : https://github.com/middagj
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55391,7 +55296,7 @@
 
 
 /***/ },
-/* 520 */
+/* 517 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55400,7 +55305,7 @@
 	//! author : Jacob Middag : https://github.com/middagj
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55482,7 +55387,7 @@
 
 
 /***/ },
-/* 521 */
+/* 518 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55490,7 +55395,7 @@
 	//! author : https://github.com/mechuwind
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55547,7 +55452,7 @@
 
 
 /***/ },
-/* 522 */
+/* 519 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55555,7 +55460,7 @@
 	//! author : Harpreet Singh : https://github.com/harpreetkhalsagtbit
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55676,7 +55581,7 @@
 
 
 /***/ },
-/* 523 */
+/* 520 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55684,7 +55589,7 @@
 	//! author : Rafal Hirsz : https://github.com/evoL
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55786,7 +55691,7 @@
 
 
 /***/ },
-/* 524 */
+/* 521 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55794,7 +55699,7 @@
 	//! author : Jefferson : https://github.com/jalex79
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55856,7 +55761,7 @@
 
 
 /***/ },
-/* 525 */
+/* 522 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55864,7 +55769,7 @@
 	//! author : Caio Ribeiro Pereira : https://github.com/caio-ribeiro-pereira
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -55922,7 +55827,7 @@
 
 
 /***/ },
-/* 526 */
+/* 523 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -55931,7 +55836,7 @@
 	//! author : Valentin Agachi : https://github.com/avaly
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56002,7 +55907,7 @@
 
 
 /***/ },
-/* 527 */
+/* 524 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56012,7 +55917,7 @@
 	//! author : Коренберг Марк : https://github.com/socketpair
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56190,7 +56095,7 @@
 
 
 /***/ },
-/* 528 */
+/* 525 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56198,7 +56103,7 @@
 	//! authors : Bård Rolstad Henriksen : https://github.com/karamell
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56256,7 +56161,7 @@
 
 
 /***/ },
-/* 529 */
+/* 526 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56264,7 +56169,7 @@
 	//! author : Sampath Sitinamaluwa : https://github.com/sampathsris
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56332,7 +56237,7 @@
 
 
 /***/ },
-/* 530 */
+/* 527 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56341,7 +56246,7 @@
 	//! based on work of petrbela : https://github.com/petrbela
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56487,7 +56392,7 @@
 
 
 /***/ },
-/* 531 */
+/* 528 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56495,7 +56400,7 @@
 	//! author : Robert Sedovšek : https://github.com/sedovsek
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56654,7 +56559,7 @@
 
 
 /***/ },
-/* 532 */
+/* 529 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56664,7 +56569,7 @@
 	//! author : Oerd Cukalla : https://github.com/oerd
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56729,7 +56634,7 @@
 
 
 /***/ },
-/* 533 */
+/* 530 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56737,7 +56642,7 @@
 	//! author : Milan Janačković<milanjanackovic@gmail.com> : https://github.com/milan-j
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56844,7 +56749,7 @@
 
 
 /***/ },
-/* 534 */
+/* 531 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56852,7 +56757,7 @@
 	//! author : Milan Janačković<milanjanackovic@gmail.com> : https://github.com/milan-j
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -56959,7 +56864,7 @@
 
 
 /***/ },
-/* 535 */
+/* 532 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -56967,7 +56872,7 @@
 	//! author : Nicolai Davies<mail@nicolai.io> : https://github.com/nicolaidavies
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57053,7 +56958,7 @@
 
 
 /***/ },
-/* 536 */
+/* 533 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57061,7 +56966,7 @@
 	//! author : Jens Alm : https://github.com/ulmus
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57127,7 +57032,7 @@
 
 
 /***/ },
-/* 537 */
+/* 534 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57135,7 +57040,7 @@
 	//! author : Fahad Kassim : https://github.com/fadsel
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57191,7 +57096,7 @@
 
 
 /***/ },
-/* 538 */
+/* 535 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57199,7 +57104,7 @@
 	//! author : Arjunkumar Krishnamoorthy : https://github.com/tk120404
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57326,7 +57231,7 @@
 
 
 /***/ },
-/* 539 */
+/* 536 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57334,7 +57239,7 @@
 	//! author : Krishna Chaitanya Thota : https://github.com/kcthota
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57420,7 +57325,7 @@
 
 
 /***/ },
-/* 540 */
+/* 537 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57429,7 +57334,7 @@
 	//! author : Onorio De J. Afonso : https://github.com/marobo
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57493,7 +57398,7 @@
 
 
 /***/ },
-/* 541 */
+/* 538 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57501,7 +57406,7 @@
 	//! author : Kridsada Thanabulpong : https://github.com/sirn
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57565,7 +57470,7 @@
 
 
 /***/ },
-/* 542 */
+/* 539 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57573,7 +57478,7 @@
 	//! author : Dan Hagman : https://github.com/hagmandan
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57632,7 +57537,7 @@
 
 
 /***/ },
-/* 543 */
+/* 540 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57640,7 +57545,7 @@
 	//! author : Dominika Kruk : https://github.com/amaranthrose
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57757,7 +57662,7 @@
 
 
 /***/ },
-/* 544 */
+/* 541 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57766,7 +57671,7 @@
 	//!           Burak Yiğit Kaya: https://github.com/BYK
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57852,7 +57757,7 @@
 
 
 /***/ },
-/* 545 */
+/* 542 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57861,7 +57766,7 @@
 	//! author : Iustì Canun
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -57948,7 +57853,7 @@
 
 
 /***/ },
-/* 546 */
+/* 543 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -57956,7 +57861,7 @@
 	//! author : Abdel Said : https://github.com/abdelsaid
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58011,7 +57916,7 @@
 
 
 /***/ },
-/* 547 */
+/* 544 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58019,7 +57924,7 @@
 	//! author : Abdel Said : https://github.com/abdelsaid
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58074,7 +57979,7 @@
 
 
 /***/ },
-/* 548 */
+/* 545 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58083,7 +57988,7 @@
 	//! Author : Menelion Elensúle : https://github.com/Oire
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58225,7 +58130,7 @@
 
 
 /***/ },
-/* 549 */
+/* 546 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58233,7 +58138,7 @@
 	//! author : Sardor Muminov : https://github.com/muminoff
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58288,7 +58193,7 @@
 
 
 /***/ },
-/* 550 */
+/* 547 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58296,7 +58201,7 @@
 	//! author : Bang Nguyen : https://github.com/bangnk
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58372,7 +58277,7 @@
 
 
 /***/ },
-/* 551 */
+/* 548 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58380,7 +58285,7 @@
 	//! author : Andrew Hood : https://github.com/andrewhood125
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58445,7 +58350,7 @@
 
 
 /***/ },
-/* 552 */
+/* 549 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58453,7 +58358,7 @@
 	//! author : Atolagbe Abisoye : https://github.com/andela-batolagbe
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58510,7 +58415,7 @@
 
 
 /***/ },
-/* 553 */
+/* 550 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58519,7 +58424,7 @@
 	//! author : Zeno Zeng : https://github.com/zenozeng
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58642,7 +58547,7 @@
 
 
 /***/ },
-/* 554 */
+/* 551 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58652,7 +58557,7 @@
 	//! author : Konstantin : https://github.com/skfd
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58752,7 +58657,7 @@
 
 
 /***/ },
-/* 555 */
+/* 552 */
 /***/ function(module, exports, __webpack_require__) {
 
 	//! moment.js locale configuration
@@ -58761,7 +58666,7 @@
 	//! author : Chris Lam : https://github.com/hehachris
 
 	;(function (global, factory) {
-	    true ? factory(__webpack_require__(446)) :
+	    true ? factory(__webpack_require__(443)) :
 	   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 	   factory(global.moment)
 	}(this, (function (moment) { 'use strict';
@@ -58861,7 +58766,7 @@
 
 
 /***/ },
-/* 556 */
+/* 553 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -58870,7 +58775,7 @@
 	  value: true
 	});
 
-	var _mapSettings = __webpack_require__(557);
+	var _mapSettings = __webpack_require__(554);
 
 	var _mapSettings2 = _interopRequireDefault(_mapSettings);
 
@@ -58879,21 +58784,26 @@
 	exports.default = new _mapSettings2.default();
 
 /***/ },
-/* 557 */
+/* 554 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(558),
-	  /* template */
-	  null,
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\js\\mapSettings.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
+
+	/* script */
+	__vue_exports__ = __webpack_require__(555)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\js\\mapSettings.vue"
 
 	/* hot reload */
 	if (false) {(function () {
@@ -58902,17 +58812,18 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-c26e9bd4", Component.options)
+	    hotAPI.createRecord("data-v-74a41800", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-c26e9bd4", Component.options)
+	    hotAPI.reload("data-v-74a41800", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] mapSettings.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
-/* 558 */
+/* 555 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -58967,7 +58878,7 @@
 	});
 
 /***/ },
-/* 559 */
+/* 556 */
 /***/ function(module, exports) {
 
 	"use strict";
@@ -58997,22 +58908,31 @@
 	exports.isWithinReach = isWithinReach;
 
 /***/ },
-/* 560 */
+/* 557 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(561),
-	  /* template */
-	  __webpack_require__(562),
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\js\\similarRequests.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
-	if (Component.options.functional) {console.error("[vue-loader] similarRequests.vue: functional components are not supported with templates, they should use render functions.")}
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
+
+	/* script */
+	__vue_exports__ = __webpack_require__(558)
+
+	/* template */
+	var __vue_template__ = __webpack_require__(559)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\js\\similarRequests.vue"
+	__vue_options__.render = __vue_template__.render
+	__vue_options__.staticRenderFns = __vue_template__.staticRenderFns
 
 	/* hot reload */
 	if (false) {(function () {
@@ -59021,17 +58941,18 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-7c2ea7c6", Component.options)
+	    hotAPI.createRecord("data-v-ee9deea0", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-7c2ea7c6", Component.options)
+	    hotAPI.reload("data-v-ee9deea0", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] similarRequests.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
-/* 561 */
+/* 558 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -59048,7 +58969,7 @@
 
 	var _lodash2 = _interopRequireDefault(_lodash);
 
-	var _mapSettings = __webpack_require__(556);
+	var _mapSettings = __webpack_require__(553);
 
 	var _mapSettings2 = _interopRequireDefault(_mapSettings);
 
@@ -59091,7 +59012,7 @@
 	//
 
 /***/ },
-/* 562 */
+/* 559 */
 /***/ function(module, exports, __webpack_require__) {
 
 	module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
@@ -59137,26 +59058,31 @@
 	if (false) {
 	  module.hot.accept()
 	  if (module.hot.data) {
-	     require("vue-hot-reload-api").rerender("data-v-7c2ea7c6", module.exports)
+	     require("vue-hot-reload-api").rerender("data-v-ee9deea0", module.exports)
 	  }
 	}
 
 /***/ },
-/* 563 */
+/* 560 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var Component = __webpack_require__(404)(
-	  /* script */
-	  __webpack_require__(564),
-	  /* template */
-	  null,
-	  /* scopeId */
-	  null,
-	  /* cssModules */
-	  null
-	)
-	Component.options.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\js\\requestsTimeHistogram.vue"
-	if (Component.esModule && Object.keys(Component.esModule).some(function (key) {return key !== "default" && key !== "__esModule"})) {console.error("named exports are not supported in *.vue files.")}
+	var __vue_exports__, __vue_options__
+	var __vue_styles__ = {}
+
+	/* script */
+	__vue_exports__ = __webpack_require__(561)
+	__vue_options__ = __vue_exports__ = __vue_exports__ || {}
+	if (
+	  typeof __vue_exports__.default === "object" ||
+	  typeof __vue_exports__.default === "function"
+	) {
+	if (Object.keys(__vue_exports__).some(function (key) { return key !== "default" && key !== "__esModule" })) {console.error("named exports are not supported in *.vue files.")}
+	__vue_options__ = __vue_exports__ = __vue_exports__.default
+	}
+	if (typeof __vue_options__ === "function") {
+	  __vue_options__ = __vue_options__.options
+	}
+	__vue_options__.__file = "C:\\Users\\Daniel\\Desktop\\beeline\\beeline-landing\\js\\requestsTimeHistogram.vue"
 
 	/* hot reload */
 	if (false) {(function () {
@@ -59165,17 +59091,18 @@
 	  if (!hotAPI.compatible) return
 	  module.hot.accept()
 	  if (!module.hot.data) {
-	    hotAPI.createRecord("data-v-1b23b12c", Component.options)
+	    hotAPI.createRecord("data-v-73ca9e58", __vue_options__)
 	  } else {
-	    hotAPI.reload("data-v-1b23b12c", Component.options)
+	    hotAPI.reload("data-v-73ca9e58", __vue_options__)
 	  }
 	})()}
+	if (__vue_options__.functional) {console.error("[vue-loader] requestsTimeHistogram.vue: functional components are not supported and should be defined in plain js files using render functions.")}
 
-	module.exports = Component.exports
+	module.exports = __vue_exports__
 
 
 /***/ },
-/* 564 */
+/* 561 */
 /***/ function(module, exports, __webpack_require__) {
 
 	'use strict';
@@ -59186,17 +59113,17 @@
 
 	var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
 
-	var _vueChartjs = __webpack_require__(565);
+	var _vueChartjs = __webpack_require__(562);
 
 	var _lodash = __webpack_require__(300);
 
 	var _lodash2 = _interopRequireDefault(_lodash);
 
-	var _mapSettings = __webpack_require__(556);
+	var _mapSettings = __webpack_require__(553);
 
 	var _mapSettings2 = _interopRequireDefault(_mapSettings);
 
-	var _leftPad = __webpack_require__(566);
+	var _leftPad = __webpack_require__(563);
 
 	var _leftPad2 = _interopRequireDefault(_leftPad);
 
@@ -59264,7 +59191,7 @@
 	});
 
 /***/ },
-/* 565 */
+/* 562 */
 /***/ function(module, exports, __webpack_require__) {
 
 	(function webpackUniversalModuleDefinition(root, factory) {
@@ -59334,31 +59261,31 @@
 
 		var _Bar2 = _interopRequireDefault(_Bar);
 
-		var _Doughnut = __webpack_require__(382);
+		var _Doughnut = __webpack_require__(380);
 
 		var _Doughnut2 = _interopRequireDefault(_Doughnut);
 
-		var _Line = __webpack_require__(383);
+		var _Line = __webpack_require__(381);
 
 		var _Line2 = _interopRequireDefault(_Line);
 
-		var _Pie = __webpack_require__(384);
+		var _Pie = __webpack_require__(382);
 
 		var _Pie2 = _interopRequireDefault(_Pie);
 
-		var _PolarArea = __webpack_require__(385);
+		var _PolarArea = __webpack_require__(383);
 
 		var _PolarArea2 = _interopRequireDefault(_PolarArea);
 
-		var _Radar = __webpack_require__(386);
+		var _Radar = __webpack_require__(384);
 
 		var _Radar2 = _interopRequireDefault(_Radar);
 
-		var _Bubble = __webpack_require__(387);
+		var _Bubble = __webpack_require__(385);
 
 		var _Bubble2 = _interopRequireDefault(_Bubble);
 
-		var _index = __webpack_require__(388);
+		var _index = __webpack_require__(386);
 
 		var _index2 = _interopRequireDefault(_index);
 
@@ -59404,7 +59331,7 @@
 
 		var _chart2 = _interopRequireDefault(_chart);
 
-		var _options = __webpack_require__(162);
+		var _options = __webpack_require__(160);
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -65888,6 +65815,7 @@
 
 		__webpack_require__(6)(Chart);
 		__webpack_require__(12)(Chart);
+		__webpack_require__(13)(Chart);
 		__webpack_require__(14)(Chart);
 		__webpack_require__(15)(Chart);
 		__webpack_require__(16)(Chart);
@@ -65900,37 +65828,35 @@
 		__webpack_require__(23)(Chart);
 		__webpack_require__(24)(Chart);
 		__webpack_require__(25)(Chart);
+
 		__webpack_require__(26)(Chart);
 		__webpack_require__(27)(Chart);
-
 		__webpack_require__(28)(Chart);
 		__webpack_require__(29)(Chart);
+
 		__webpack_require__(30)(Chart);
 		__webpack_require__(31)(Chart);
-
 		__webpack_require__(32)(Chart);
 		__webpack_require__(33)(Chart);
 		__webpack_require__(34)(Chart);
 		__webpack_require__(35)(Chart);
-		__webpack_require__(36)(Chart);
-		__webpack_require__(37)(Chart);
 
 		// Controllers must be loaded after elements
 		// See Chart.core.datasetController.dataElementType
+		__webpack_require__(147)(Chart);
+		__webpack_require__(148)(Chart);
 		__webpack_require__(149)(Chart);
 		__webpack_require__(150)(Chart);
 		__webpack_require__(151)(Chart);
 		__webpack_require__(152)(Chart);
+
 		__webpack_require__(153)(Chart);
 		__webpack_require__(154)(Chart);
-
 		__webpack_require__(155)(Chart);
 		__webpack_require__(156)(Chart);
 		__webpack_require__(157)(Chart);
 		__webpack_require__(158)(Chart);
 		__webpack_require__(159)(Chart);
-		__webpack_require__(160)(Chart);
-		__webpack_require__(161)(Chart);
 
 		window.Chart = module.exports = Chart;
 
@@ -66240,10 +66166,6 @@
 			helpers.almostEquals = function(x, y, epsilon) {
 				return Math.abs(x - y) < epsilon;
 			};
-			helpers.almostWhole = function(x, epsilon) {
-				var rounded = Math.round(x);
-				return (((rounded - epsilon) < x) && ((rounded + epsilon) > x));
-			};
 			helpers.max = function(array) {
 				return array.reduce(function(max, value) {
 					if (!isNaN(value)) {
@@ -66368,10 +66290,7 @@
 					pointBefore = i > 0 ? pointsWithTangents[i - 1] : null;
 					pointAfter = i < pointsLen - 1 ? pointsWithTangents[i + 1] : null;
 					if (pointAfter && !pointAfter.model.skip) {
-						var slopeDeltaX = (pointAfter.model.x - pointCurrent.model.x);
-
-						// In the case of two points that appear at the same x pixel, slopeDeltaX is 0
-						pointCurrent.deltaK = slopeDeltaX !== 0 ? (pointAfter.model.y - pointCurrent.model.y) / slopeDeltaX : 0;
+						pointCurrent.deltaK = (pointAfter.model.y - pointCurrent.model.y) / (pointAfter.model.x - pointCurrent.model.x);
 					}
 
 					if (!pointBefore || pointBefore.model.skip) {
@@ -66681,6 +66600,16 @@
 						return window.setTimeout(callback, 1000 / 60);
 					};
 			}());
+			helpers.cancelAnimFrame = (function() {
+				return window.cancelAnimationFrame ||
+					window.webkitCancelAnimationFrame ||
+					window.mozCancelAnimationFrame ||
+					window.oCancelAnimationFrame ||
+					window.msCancelAnimationFrame ||
+					function(callback) {
+						return window.clearTimeout(callback, 1000 / 60);
+					};
+			}());
 			// -- DOM methods
 			helpers.getRelativePosition = function(evt, chart) {
 				var mouseX, mouseY;
@@ -66736,6 +66665,23 @@
 				} else {
 					node['on' + eventType] = helpers.noop;
 				}
+			};
+			helpers.bindEvents = function(chartInstance, arrayOfEvents, handler) {
+				// Create the events object if it's not already present
+				var events = chartInstance.events = chartInstance.events || {};
+
+				helpers.each(arrayOfEvents, function(eventName) {
+					events[eventName] = function() {
+						handler.apply(chartInstance, arguments);
+					};
+					helpers.addEvent(chartInstance.chart.canvas, eventName, events[eventName]);
+				});
+			};
+			helpers.unbindEvents = function(chartInstance, arrayOfEvents) {
+				var canvas = chartInstance.chart.canvas;
+				helpers.each(arrayOfEvents, function(handler, eventName) {
+					helpers.removeEvent(canvas, eventName, handler);
+				});
 			};
 
 			// Private helper function to convert max-width/max-height values that may be percentages into a number
@@ -66926,6 +66872,73 @@
 				}
 
 				return color(c);
+			};
+			helpers.addResizeListener = function(node, callback) {
+				var iframe = document.createElement('iframe');
+				iframe.className = 'chartjs-hidden-iframe';
+				iframe.style.cssText =
+					'display:block;'+
+					'overflow:hidden;'+
+					'border:0;'+
+					'margin:0;'+
+					'top:0;'+
+					'left:0;'+
+					'bottom:0;'+
+					'right:0;'+
+					'height:100%;'+
+					'width:100%;'+
+					'position:absolute;'+
+					'pointer-events:none;'+
+					'z-index:-1;';
+
+				// Prevent the iframe to gain focus on tab.
+				// https://github.com/chartjs/Chart.js/issues/3090
+				iframe.tabIndex = -1;
+
+				// Let's keep track of this added iframe and thus avoid DOM query when removing it.
+				var stub = node._chartjs = {
+					resizer: iframe,
+					ticking: false
+				};
+
+				// Throttle the callback notification until the next animation frame.
+				var notify = function() {
+					if (!stub.ticking) {
+						stub.ticking = true;
+						helpers.requestAnimFrame.call(window, function() {
+							if (stub.resizer) {
+								stub.ticking = false;
+								return callback();
+							}
+						});
+					}
+				};
+
+				// If the iframe is re-attached to the DOM, the resize listener is removed because the
+				// content is reloaded, so make sure to install the handler after the iframe is loaded.
+				// https://github.com/chartjs/Chart.js/issues/3521
+				helpers.addEvent(iframe, 'load', function() {
+					helpers.addEvent(iframe.contentWindow || iframe, 'resize', notify);
+
+					// The iframe size might have changed while loading, which can also
+					// happen if the size has been changed while detached from the DOM.
+					notify();
+				});
+
+				node.insertBefore(iframe, node.firstChild);
+			};
+			helpers.removeResizeListener = function(node) {
+				if (!node || !node._chartjs) {
+					return;
+				}
+
+				var iframe = node._chartjs.resizer;
+				if (iframe) {
+					iframe.parentNode.removeChild(iframe);
+					node._chartjs.resizer = null;
+				}
+
+				delete node._chartjs;
 			};
 			helpers.isArray = Array.isArray?
 				function(obj) {
@@ -68646,364 +68659,6 @@
 
 	/***/ },
 	/* 12 */
-	/***/ function(module, exports, __webpack_require__) {
-
-		'use strict';
-
-		// By default, select the browser (DOM) platform.
-		// @TODO Make possible to select another platform at build time.
-		var implementation = __webpack_require__(13);
-
-		module.exports = function(Chart) {
-			/**
-			 * @namespace Chart.platform
-			 * @see https://chartjs.gitbooks.io/proposals/content/Platform.html
-			 * @since 2.4.0
-			 */
-			Chart.platform = {
-				/**
-				 * Called at chart construction time, returns a context2d instance implementing
-				 * the [W3C Canvas 2D Context API standard]{@link https://www.w3.org/TR/2dcontext/}.
-				 * @param {*} item - The native item from which to acquire context (platform specific)
-				 * @param {Object} options - The chart options
-				 * @returns {CanvasRenderingContext2D} context2d instance
-				 */
-				acquireContext: function() {},
-
-				/**
-				 * Called at chart destruction time, releases any resources associated to the context
-				 * previously returned by the acquireContext() method.
-				 * @param {CanvasRenderingContext2D} context - The context2d instance
-				 * @returns {Boolean} true if the method succeeded, else false
-				 */
-				releaseContext: function() {},
-
-				/**
-				 * Registers the specified listener on the given chart.
-				 * @param {Chart} chart - Chart from which to listen for event
-				 * @param {String} type - The ({@link IEvent}) type to listen for
-				 * @param {Function} listener - Receives a notification (an object that implements
-				 * the {@link IEvent} interface) when an event of the specified type occurs.
-				 */
-				addEventListener: function() {},
-
-				/**
-				 * Removes the specified listener previously registered with addEventListener.
-				 * @param {Chart} chart -Chart from which to remove the listener
-				 * @param {String} type - The ({@link IEvent}) type to remove
-				 * @param {Function} listener - The listener function to remove from the event target.
-				 */
-				removeEventListener: function() {}
-			};
-
-			/**
-			 * @interface IPlatform
-			 * Allows abstracting platform dependencies away from the chart
-			 * @borrows Chart.platform.acquireContext as acquireContext
-			 * @borrows Chart.platform.releaseContext as releaseContext
-			 * @borrows Chart.platform.addEventListener as addEventListener
-			 * @borrows Chart.platform.removeEventListener as removeEventListener
-			 */
-
-			/**
-			 * @interface IEvent
-			 * @prop {String} type - The event type name, possible values are:
-			 * 'contextmenu', 'mouseenter', 'mousedown', 'mousemove', 'mouseup', 'mouseout',
-			 * 'click', 'dblclick', 'keydown', 'keypress', 'keyup' and 'resize'
-			 * @prop {*} native - The original native event (null for emulated events, e.g. 'resize')
-			 * @prop {Number} x - The mouse x position, relative to the canvas (null for incompatible events)
-			 * @prop {Number} y - The mouse y position, relative to the canvas (null for incompatible events)
-			 */
-
-			Chart.helpers.extend(Chart.platform, implementation(Chart));
-		};
-
-
-	/***/ },
-	/* 13 */
-	/***/ function(module, exports) {
-
-		'use strict';
-
-		// Chart.Platform implementation for targeting a web browser
-		module.exports = function(Chart) {
-			var helpers = Chart.helpers;
-
-			// DOM event types -> Chart.js event types.
-			// Note: only events with different types are mapped.
-			// https://developer.mozilla.org/en-US/docs/Web/Events
-			var eventTypeMap = {
-				// Touch events
-				touchstart: 'mousedown',
-				touchmove: 'mousemove',
-				touchend: 'mouseup',
-
-				// Pointer events
-				pointerenter: 'mouseenter',
-				pointerdown: 'mousedown',
-				pointermove: 'mousemove',
-				pointerup: 'mouseup',
-				pointerleave: 'mouseout',
-				pointerout: 'mouseout'
-			};
-
-			/**
-			 * The "used" size is the final value of a dimension property after all calculations have
-			 * been performed. This method uses the computed style of `element` but returns undefined
-			 * if the computed style is not expressed in pixels. That can happen in some cases where
-			 * `element` has a size relative to its parent and this last one is not yet displayed,
-			 * for example because of `display: none` on a parent node.
-			 * @see https://developer.mozilla.org/en-US/docs/Web/CSS/used_value
-			 * @returns {Number} Size in pixels or undefined if unknown.
-			 */
-			function readUsedSize(element, property) {
-				var value = helpers.getStyle(element, property);
-				var matches = value && value.match(/(\d+)px/);
-				return matches? Number(matches[1]) : undefined;
-			}
-
-			/**
-			 * Initializes the canvas style and render size without modifying the canvas display size,
-			 * since responsiveness is handled by the controller.resize() method. The config is used
-			 * to determine the aspect ratio to apply in case no explicit height has been specified.
-			 */
-			function initCanvas(canvas, config) {
-				var style = canvas.style;
-
-				// NOTE(SB) canvas.getAttribute('width') !== canvas.width: in the first case it
-				// returns null or '' if no explicit value has been set to the canvas attribute.
-				var renderHeight = canvas.getAttribute('height');
-				var renderWidth = canvas.getAttribute('width');
-
-				// Chart.js modifies some canvas values that we want to restore on destroy
-				canvas._chartjs = {
-					initial: {
-						height: renderHeight,
-						width: renderWidth,
-						style: {
-							display: style.display,
-							height: style.height,
-							width: style.width
-						}
-					}
-				};
-
-				// Force canvas to display as block to avoid extra space caused by inline
-				// elements, which would interfere with the responsive resize process.
-				// https://github.com/chartjs/Chart.js/issues/2538
-				style.display = style.display || 'block';
-
-				if (renderWidth === null || renderWidth === '') {
-					var displayWidth = readUsedSize(canvas, 'width');
-					if (displayWidth !== undefined) {
-						canvas.width = displayWidth;
-					}
-				}
-
-				if (renderHeight === null || renderHeight === '') {
-					if (canvas.style.height === '') {
-						// If no explicit render height and style height, let's apply the aspect ratio,
-						// which one can be specified by the user but also by charts as default option
-						// (i.e. options.aspectRatio). If not specified, use canvas aspect ratio of 2.
-						canvas.height = canvas.width / (config.options.aspectRatio || 2);
-					} else {
-						var displayHeight = readUsedSize(canvas, 'height');
-						if (displayWidth !== undefined) {
-							canvas.height = displayHeight;
-						}
-					}
-				}
-
-				return canvas;
-			}
-
-			function createEvent(type, chart, x, y, native) {
-				return {
-					type: type,
-					chart: chart,
-					native: native || null,
-					x: x !== undefined? x : null,
-					y: y !== undefined? y : null,
-				};
-			}
-
-			function fromNativeEvent(event, chart) {
-				var type = eventTypeMap[event.type] || event.type;
-				var pos = helpers.getRelativePosition(event, chart);
-				return createEvent(type, chart, pos.x, pos.y, event);
-			}
-
-			function createResizer(handler) {
-				var iframe = document.createElement('iframe');
-				iframe.className = 'chartjs-hidden-iframe';
-				iframe.style.cssText =
-					'display:block;'+
-					'overflow:hidden;'+
-					'border:0;'+
-					'margin:0;'+
-					'top:0;'+
-					'left:0;'+
-					'bottom:0;'+
-					'right:0;'+
-					'height:100%;'+
-					'width:100%;'+
-					'position:absolute;'+
-					'pointer-events:none;'+
-					'z-index:-1;';
-
-				// Prevent the iframe to gain focus on tab.
-				// https://github.com/chartjs/Chart.js/issues/3090
-				iframe.tabIndex = -1;
-
-				// If the iframe is re-attached to the DOM, the resize listener is removed because the
-				// content is reloaded, so make sure to install the handler after the iframe is loaded.
-				// https://github.com/chartjs/Chart.js/issues/3521
-				helpers.addEvent(iframe, 'load', function() {
-					helpers.addEvent(iframe.contentWindow || iframe, 'resize', handler);
-
-					// The iframe size might have changed while loading, which can also
-					// happen if the size has been changed while detached from the DOM.
-					handler();
-				});
-
-				return iframe;
-			}
-
-			function addResizeListener(node, listener, chart) {
-				var stub = node._chartjs = {
-					ticking: false
-				};
-
-				// Throttle the callback notification until the next animation frame.
-				var notify = function() {
-					if (!stub.ticking) {
-						stub.ticking = true;
-						helpers.requestAnimFrame.call(window, function() {
-							if (stub.resizer) {
-								stub.ticking = false;
-								return listener(createEvent('resize', chart));
-							}
-						});
-					}
-				};
-
-				// Let's keep track of this added iframe and thus avoid DOM query when removing it.
-				stub.resizer = createResizer(notify);
-
-				node.insertBefore(stub.resizer, node.firstChild);
-			}
-
-			function removeResizeListener(node) {
-				if (!node || !node._chartjs) {
-					return;
-				}
-
-				var resizer = node._chartjs.resizer;
-				if (resizer) {
-					resizer.parentNode.removeChild(resizer);
-					node._chartjs.resizer = null;
-				}
-
-				delete node._chartjs;
-			}
-
-			return {
-				acquireContext: function(item, config) {
-					if (typeof item === 'string') {
-						item = document.getElementById(item);
-					} else if (item.length) {
-						// Support for array based queries (such as jQuery)
-						item = item[0];
-					}
-
-					if (item && item.canvas) {
-						// Support for any object associated to a canvas (including a context2d)
-						item = item.canvas;
-					}
-
-					if (item instanceof HTMLCanvasElement) {
-						// To prevent canvas fingerprinting, some add-ons undefine the getContext
-						// method, for example: https://github.com/kkapsner/CanvasBlocker
-						// https://github.com/chartjs/Chart.js/issues/2807
-						var context = item.getContext && item.getContext('2d');
-						if (context instanceof CanvasRenderingContext2D) {
-							initCanvas(item, config);
-							return context;
-						}
-					}
-
-					return null;
-				},
-
-				releaseContext: function(context) {
-					var canvas = context.canvas;
-					if (!canvas._chartjs) {
-						return;
-					}
-
-					var initial = canvas._chartjs.initial;
-					['height', 'width'].forEach(function(prop) {
-						var value = initial[prop];
-						if (value === undefined || value === null) {
-							canvas.removeAttribute(prop);
-						} else {
-							canvas.setAttribute(prop, value);
-						}
-					});
-
-					helpers.each(initial.style || {}, function(value, key) {
-						canvas.style[key] = value;
-					});
-
-					// The canvas render size might have been changed (and thus the state stack discarded),
-					// we can't use save() and restore() to restore the initial state. So make sure that at
-					// least the canvas context is reset to the default state by setting the canvas width.
-					// https://www.w3.org/TR/2011/WD-html5-20110525/the-canvas-element.html
-					canvas.width = canvas.width;
-
-					delete canvas._chartjs;
-				},
-
-				addEventListener: function(chart, type, listener) {
-					var canvas = chart.chart.canvas;
-					if (type === 'resize') {
-						// Note: the resize event is not supported on all browsers.
-						addResizeListener(canvas.parentNode, listener, chart.chart);
-						return;
-					}
-
-					var stub = listener._chartjs || (listener._chartjs = {});
-					var proxies = stub.proxies || (stub.proxies = {});
-					var proxy = proxies[chart.id + '_' + type] = function(event) {
-						listener(fromNativeEvent(event, chart.chart));
-					};
-
-					helpers.addEvent(canvas, type, proxy);
-				},
-
-				removeEventListener: function(chart, type, listener) {
-					var canvas = chart.chart.canvas;
-					if (type === 'resize') {
-						// Note: the resize event is not supported on all browsers.
-						removeResizeListener(canvas.parentNode, listener);
-						return;
-					}
-
-					var stub = listener._chartjs || {};
-					var proxies = stub.proxies || {};
-					var proxy = proxies[chart.id + '_' + type];
-					if (!proxy) {
-						return;
-					}
-
-					helpers.removeEvent(canvas, type, proxy);
-				}
-			};
-		};
-
-
-	/***/ },
-	/* 14 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -69050,14 +68705,6 @@
 					ctx.beginPath();
 					ctx.fillRect(x - size, y - size, 2 * size, 2 * size);
 					ctx.strokeRect(x - size, y - size, 2 * size, 2 * size);
-					break;
-				case 'rectRounded':
-					var offset = radius / Math.SQRT2;
-					var leftX = x - offset;
-					var topY = y - offset;
-					var sideSize = Math.SQRT2 * radius;
-					Chart.helpers.drawRoundedRectangle(ctx, leftX, topY, sideSize, sideSize, radius / 2);
-					ctx.fill();
 					break;
 				case 'rectRot':
 					size = 1 / Math.SQRT2 * radius;
@@ -69117,354 +68764,11 @@
 
 				ctx.stroke();
 			};
-
-			helpers.clipArea = function(ctx, clipArea) {
-				ctx.save();
-				ctx.beginPath();
-				ctx.rect(clipArea.left, clipArea.top, clipArea.right - clipArea.left, clipArea.bottom - clipArea.top);
-				ctx.clip();
-			};
-
-			helpers.unclipArea = function(ctx) {
-				ctx.restore();
-			};
-
 		};
 
 
 	/***/ },
-	/* 15 */
-	/***/ function(module, exports) {
-
-		'use strict';
-
-		module.exports = function(Chart) {
-
-			var helpers = Chart.helpers;
-
-			Chart.defaults.global.plugins = {};
-
-			/**
-			 * The plugin service singleton
-			 * @namespace Chart.plugins
-			 * @since 2.1.0
-			 */
-			Chart.plugins = {
-				/**
-				 * Globally registered plugins.
-				 * @private
-				 */
-				_plugins: [],
-
-				/**
-				 * This identifier is used to invalidate the descriptors cache attached to each chart
-				 * when a global plugin is registered or unregistered. In this case, the cache ID is
-				 * incremented and descriptors are regenerated during following API calls.
-				 * @private
-				 */
-				_cacheId: 0,
-
-				/**
-				 * Registers the given plugin(s) if not already registered.
-				 * @param {Array|Object} plugins plugin instance(s).
-				 */
-				register: function(plugins) {
-					var p = this._plugins;
-					([]).concat(plugins).forEach(function(plugin) {
-						if (p.indexOf(plugin) === -1) {
-							p.push(plugin);
-						}
-					});
-
-					this._cacheId++;
-				},
-
-				/**
-				 * Unregisters the given plugin(s) only if registered.
-				 * @param {Array|Object} plugins plugin instance(s).
-				 */
-				unregister: function(plugins) {
-					var p = this._plugins;
-					([]).concat(plugins).forEach(function(plugin) {
-						var idx = p.indexOf(plugin);
-						if (idx !== -1) {
-							p.splice(idx, 1);
-						}
-					});
-
-					this._cacheId++;
-				},
-
-				/**
-				 * Remove all registered plugins.
-				 * @since 2.1.5
-				 */
-				clear: function() {
-					this._plugins = [];
-					this._cacheId++;
-				},
-
-				/**
-				 * Returns the number of registered plugins?
-				 * @returns {Number}
-				 * @since 2.1.5
-				 */
-				count: function() {
-					return this._plugins.length;
-				},
-
-				/**
-				 * Returns all registered plugin instances.
-				 * @returns {Array} array of plugin objects.
-				 * @since 2.1.5
-				 */
-				getAll: function() {
-					return this._plugins;
-				},
-
-				/**
-				 * Calls enabled plugins for `chart` on the specified hook and with the given args.
-				 * This method immediately returns as soon as a plugin explicitly returns false. The
-				 * returned value can be used, for instance, to interrupt the current action.
-				 * @param {Object} chart - The chart instance for which plugins should be called.
-				 * @param {String} hook - The name of the plugin method to call (e.g. 'beforeUpdate').
-				 * @param {Array} [args] - Extra arguments to apply to the hook call.
-				 * @returns {Boolean} false if any of the plugins return false, else returns true.
-				 */
-				notify: function(chart, hook, args) {
-					var descriptors = this.descriptors(chart);
-					var ilen = descriptors.length;
-					var i, descriptor, plugin, params, method;
-
-					for (i=0; i<ilen; ++i) {
-						descriptor = descriptors[i];
-						plugin = descriptor.plugin;
-						method = plugin[hook];
-						if (typeof method === 'function') {
-							params = [chart].concat(args || []);
-							params.push(descriptor.options);
-							if (method.apply(plugin, params) === false) {
-								return false;
-							}
-						}
-					}
-
-					return true;
-				},
-
-				/**
-				 * Returns descriptors of enabled plugins for the given chart.
-				 * @returns {Array} [{ plugin, options }]
-				 * @private
-				 */
-				descriptors: function(chart) {
-					var cache = chart._plugins || (chart._plugins = {});
-					if (cache.id === this._cacheId) {
-						return cache.descriptors;
-					}
-
-					var plugins = [];
-					var descriptors = [];
-					var config = (chart && chart.config) || {};
-					var defaults = Chart.defaults.global.plugins;
-					var options = (config.options && config.options.plugins) || {};
-
-					this._plugins.concat(config.plugins || []).forEach(function(plugin) {
-						var idx = plugins.indexOf(plugin);
-						if (idx !== -1) {
-							return;
-						}
-
-						var id = plugin.id;
-						var opts = options[id];
-						if (opts === false) {
-							return;
-						}
-
-						if (opts === true) {
-							opts = helpers.clone(defaults[id]);
-						}
-
-						plugins.push(plugin);
-						descriptors.push({
-							plugin: plugin,
-							options: opts || {}
-						});
-					});
-
-					cache.descriptors = descriptors;
-					cache.id = this._cacheId;
-					return descriptors;
-				}
-			};
-
-			/**
-			 * Plugin extension hooks.
-			 * @interface IPlugin
-			 * @since 2.1.0
-			 */
-			/**
-			 * @method IPlugin#beforeInit
-			 * @desc Called before initializing `chart`.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#afterInit
-			 * @desc Called after `chart` has been initialized and before the first update.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#beforeUpdate
-			 * @desc Called before updating `chart`. If any plugin returns `false`, the update
-			 * is cancelled (and thus subsequent render(s)) until another `update` is triggered.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 * @returns {Boolean} `false` to cancel the chart update.
-			 */
-			/**
-			 * @method IPlugin#afterUpdate
-			 * @desc Called after `chart` has been updated and before rendering. Note that this
-			 * hook will not be called if the chart update has been previously cancelled.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#beforeDatasetsUpdate
-		 	 * @desc Called before updating the `chart` datasets. If any plugin returns `false`,
-			 * the datasets update is cancelled until another `update` is triggered.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 * @returns {Boolean} false to cancel the datasets update.
-			 * @since version 2.1.5
-			 */
-			/**
-			 * @method IPlugin#afterDatasetsUpdate
-			 * @desc Called after the `chart` datasets have been updated. Note that this hook
-			 * will not be called if the datasets update has been previously cancelled.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 * @since version 2.1.5
-			 */
-			/**
-			 * @method IPlugin#beforeLayout
-			 * @desc Called before laying out `chart`. If any plugin returns `false`,
-			 * the layout update is cancelled until another `update` is triggered.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 * @returns {Boolean} `false` to cancel the chart layout.
-			 */
-			/**
-			 * @method IPlugin#afterLayout
-			 * @desc Called after the `chart` has been layed out. Note that this hook will not
-			 * be called if the layout update has been previously cancelled.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#beforeRender
-			 * @desc Called before rendering `chart`. If any plugin returns `false`,
-			 * the rendering is cancelled until another `render` is triggered.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 * @returns {Boolean} `false` to cancel the chart rendering.
-			 */
-			/**
-			 * @method IPlugin#afterRender
-			 * @desc Called after the `chart` has been fully rendered (and animation completed). Note
-			 * that this hook will not be called if the rendering has been previously cancelled.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#beforeDraw
-			 * @desc Called before drawing `chart` at every animation frame specified by the given
-			 * easing value. If any plugin returns `false`, the frame drawing is cancelled until
-			 * another `render` is triggered.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Number} easingValue - The current animation value, between 0.0 and 1.0.
-			 * @param {Object} options - The plugin options.
-			 * @returns {Boolean} `false` to cancel the chart drawing.
-			 */
-			/**
-			 * @method IPlugin#afterDraw
-			 * @desc Called after the `chart` has been drawn for the specific easing value. Note
-			 * that this hook will not be called if the drawing has been previously cancelled.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Number} easingValue - The current animation value, between 0.0 and 1.0.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#beforeDatasetsDraw
-		 	 * @desc Called before drawing the `chart` datasets. If any plugin returns `false`,
-			 * the datasets drawing is cancelled until another `render` is triggered.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Number} easingValue - The current animation value, between 0.0 and 1.0.
-			 * @param {Object} options - The plugin options.
-			 * @returns {Boolean} `false` to cancel the chart datasets drawing.
-			 */
-			/**
-			 * @method IPlugin#afterDatasetsDraw
-			 * @desc Called after the `chart` datasets have been drawn. Note that this hook
-			 * will not be called if the datasets drawing has been previously cancelled.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Number} easingValue - The current animation value, between 0.0 and 1.0.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#beforeEvent
-		 	 * @desc Called before processing the specified `event`. If any plugin returns `false`,
-			 * the event will be discarded.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {IEvent} event - The event object.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#afterEvent
-			 * @desc Called after the `event` has been consumed. Note that this hook
-			 * will not be called if the `event` has been previously discarded.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {IEvent} event - The event object.
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#resize
-			 * @desc Called after the chart as been resized.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Number} size - The new canvas display size (eq. canvas.style width & height).
-			 * @param {Object} options - The plugin options.
-			 */
-			/**
-			 * @method IPlugin#destroy
-			 * @desc Called after the chart as been destroyed.
-			 * @param {Chart.Controller} chart - The chart instance.
-			 * @param {Object} options - The plugin options.
-			 */
-
-			/**
-			 * Provided for backward compatibility, use Chart.plugins instead
-			 * @namespace Chart.pluginService
-			 * @deprecated since version 2.1.5
-			 * @todo remove at version 3
-			 * @private
-			 */
-			Chart.pluginService = Chart.plugins;
-
-			/**
-			 * Provided for backward compatibility, inheriting from Chart.PlugingBase has no
-			 * effect, instead simply create/register plugins via plain JavaScript objects.
-			 * @interface Chart.PluginBase
-			 * @deprecated since version 2.5.0
-			 * @todo remove at version 3
-			 * @private
-			 */
-			Chart.PluginBase = helpers.inherits({});
-		};
-
-
-	/***/ },
-	/* 16 */
+	/* 13 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -69566,7 +68870,7 @@
 
 
 	/***/ },
-	/* 17 */
+	/* 14 */
 	/***/ function(module, exports) {
 
 		/* global window: false */
@@ -69711,7 +69015,7 @@
 
 
 	/***/ },
-	/* 18 */
+	/* 15 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -69719,8 +69023,6 @@
 		module.exports = function(Chart) {
 
 			var helpers = Chart.helpers;
-			var plugins = Chart.plugins;
-			var platform = Chart.platform;
 
 			// Create a dictionary of chart types, to allow for extension of existing types
 			Chart.types = {};
@@ -69731,6 +69033,140 @@
 
 			// Controllers available for dataset visualization eg. bar, line, slice, etc.
 			Chart.controllers = {};
+
+			/**
+			 * The "used" size is the final value of a dimension property after all calculations have
+			 * been performed. This method uses the computed style of `element` but returns undefined
+			 * if the computed style is not expressed in pixels. That can happen in some cases where
+			 * `element` has a size relative to its parent and this last one is not yet displayed,
+			 * for example because of `display: none` on a parent node.
+			 * TODO(SB) Move this method in the upcoming core.platform class.
+			 * @see https://developer.mozilla.org/en-US/docs/Web/CSS/used_value
+			 * @returns {Number} Size in pixels or undefined if unknown.
+			 */
+			function readUsedSize(element, property) {
+				var value = helpers.getStyle(element, property);
+				var matches = value && value.match(/(\d+)px/);
+				return matches? Number(matches[1]) : undefined;
+			}
+
+			/**
+			 * Initializes the canvas style and render size without modifying the canvas display size,
+			 * since responsiveness is handled by the controller.resize() method. The config is used
+			 * to determine the aspect ratio to apply in case no explicit height has been specified.
+			 * TODO(SB) Move this method in the upcoming core.platform class.
+			 */
+			function initCanvas(canvas, config) {
+				var style = canvas.style;
+
+				// NOTE(SB) canvas.getAttribute('width') !== canvas.width: in the first case it
+				// returns null or '' if no explicit value has been set to the canvas attribute.
+				var renderHeight = canvas.getAttribute('height');
+				var renderWidth = canvas.getAttribute('width');
+
+				// Chart.js modifies some canvas values that we want to restore on destroy
+				canvas._chartjs = {
+					initial: {
+						height: renderHeight,
+						width: renderWidth,
+						style: {
+							display: style.display,
+							height: style.height,
+							width: style.width
+						}
+					}
+				};
+
+				// Force canvas to display as block to avoid extra space caused by inline
+				// elements, which would interfere with the responsive resize process.
+				// https://github.com/chartjs/Chart.js/issues/2538
+				style.display = style.display || 'block';
+
+				if (renderWidth === null || renderWidth === '') {
+					var displayWidth = readUsedSize(canvas, 'width');
+					if (displayWidth !== undefined) {
+						canvas.width = displayWidth;
+					}
+				}
+
+				if (renderHeight === null || renderHeight === '') {
+					if (canvas.style.height === '') {
+						// If no explicit render height and style height, let's apply the aspect ratio,
+						// which one can be specified by the user but also by charts as default option
+						// (i.e. options.aspectRatio). If not specified, use canvas aspect ratio of 2.
+						canvas.height = canvas.width / (config.options.aspectRatio || 2);
+					} else {
+						var displayHeight = readUsedSize(canvas, 'height');
+						if (displayWidth !== undefined) {
+							canvas.height = displayHeight;
+						}
+					}
+				}
+
+				return canvas;
+			}
+
+			/**
+			 * Restores the canvas initial state, such as render/display sizes and style.
+			 * TODO(SB) Move this method in the upcoming core.platform class.
+			 */
+			function releaseCanvas(canvas) {
+				if (!canvas._chartjs) {
+					return;
+				}
+
+				var initial = canvas._chartjs.initial;
+				['height', 'width'].forEach(function(prop) {
+					var value = initial[prop];
+					if (value === undefined || value === null) {
+						canvas.removeAttribute(prop);
+					} else {
+						canvas.setAttribute(prop, value);
+					}
+				});
+
+				helpers.each(initial.style || {}, function(value, key) {
+					canvas.style[key] = value;
+				});
+
+				// The canvas render size might have been changed (and thus the state stack discarded),
+				// we can't use save() and restore() to restore the initial state. So make sure that at
+				// least the canvas context is reset to the default state by setting the canvas width.
+				// https://www.w3.org/TR/2011/WD-html5-20110525/the-canvas-element.html
+				canvas.width = canvas.width;
+
+				delete canvas._chartjs;
+			}
+
+			/**
+			 * TODO(SB) Move this method in the upcoming core.platform class.
+			 */
+			function acquireContext(item, config) {
+				if (typeof item === 'string') {
+					item = document.getElementById(item);
+				} else if (item.length) {
+					// Support for array based queries (such as jQuery)
+					item = item[0];
+				}
+
+				if (item && item.canvas) {
+					// Support for any object associated to a canvas (including a context2d)
+					item = item.canvas;
+				}
+
+				if (item instanceof HTMLCanvasElement) {
+					// To prevent canvas fingerprinting, some add-ons undefine the getContext
+					// method, for example: https://github.com/kkapsner/CanvasBlocker
+					// https://github.com/chartjs/Chart.js/issues/2807
+					var context = item.getContext && item.getContext('2d');
+					if (context instanceof CanvasRenderingContext2D) {
+						initCanvas(item, config);
+						return context;
+					}
+				}
+
+				return null;
+			}
 
 			/**
 			 * Initializes the given config with global and chart default values.
@@ -69753,26 +69189,6 @@
 			}
 
 			/**
-			 * Updates the config of the chart
-			 * @param chart {Chart.Controller} chart to update the options for
-			 */
-			function updateConfig(chart) {
-				var newOptions = chart.options;
-
-				// Update Scale(s) with options
-				if (newOptions.scale) {
-					chart.scale.options = newOptions.scale;
-				} else if (newOptions.scales) {
-					newOptions.scales.xAxes.concat(newOptions.scales.yAxes).forEach(function(scaleOptions) {
-						chart.scales[scaleOptions.id].options = scaleOptions;
-					});
-				}
-
-				// Tooltip
-				chart.tooltip._options = newOptions.tooltips;
-			}
-
-			/**
 			 * @class Chart.Controller
 			 * The main controller of a chart.
 			 */
@@ -69781,7 +69197,7 @@
 
 				config = initConfig(config);
 
-				var context = platform.acquireContext(item, config);
+				var context = acquireContext(item, config);
 				var canvas = context && context.canvas;
 				var height = canvas && canvas.height;
 				var width = canvas && canvas.width;
@@ -69817,35 +69233,47 @@
 					return me;
 				}
 
+				helpers.retinaScale(instance);
+
+				// Responsiveness is currently based on the use of an iframe, however this method causes
+				// performance issues and could be troublesome when used with ad blockers. So make sure
+				// that the user is still able to create a chart without iframe when responsive is false.
+				// See https://github.com/chartjs/Chart.js/issues/2210
+				if (me.options.responsive) {
+					helpers.addResizeListener(canvas.parentNode, function() {
+						me.resize();
+					});
+
+					// Initial resize before chart draws (must be silent to preserve initial animations).
+					me.resize(true);
+				}
+
 				me.initialize();
-				me.update();
 
 				return me;
 			};
 
-			helpers.extend(Chart.Controller.prototype, /** @lends Chart.Controller.prototype */ {
+			helpers.extend(Chart.Controller.prototype, /** @lends Chart.Controller */ {
 				initialize: function() {
 					var me = this;
 
 					// Before init plugin notification
-					plugins.notify(me, 'beforeInit');
-
-					helpers.retinaScale(me.chart);
+					Chart.plugins.notify('beforeInit', [me]);
 
 					me.bindEvents();
 
-					if (me.options.responsive) {
-						// Initial resize before chart draws (must be silent to preserve initial animations).
-						me.resize(true);
-					}
-
-					// Make sure scales have IDs and are built before we build any controllers.
+					// Make sure controllers are built first so that each dataset is bound to an axis before the scales
+					// are built
 					me.ensureScalesHaveIDs();
+					me.buildOrUpdateControllers();
 					me.buildScales();
+					me.updateLayout();
+					me.resetElements();
 					me.initToolTip();
+					me.update();
 
 					// After init plugin notification
-					plugins.notify(me, 'afterInit');
+					Chart.plugins.notify('afterInit', [me]);
 
 					return me;
 				},
@@ -69884,16 +69312,16 @@
 
 					helpers.retinaScale(chart);
 
+					// Notify any plugins about the resize
+					var newSize = {width: newWidth, height: newHeight};
+					Chart.plugins.notify('resize', [me, newSize]);
+
+					// Notify of resize
+					if (me.options.onResize) {
+						me.options.onResize(me, newSize);
+					}
+
 					if (!silent) {
-						// Notify any plugins about the resize
-						var newSize = {width: newWidth, height: newHeight};
-						plugins.notify(me, 'resize', [newSize]);
-
-						// Notify of resize
-						if (me.options.onResize) {
-							me.options.onResize(me, newSize);
-						}
-
 						me.stop();
 						me.update(me.options.responsiveAnimationDuration);
 					}
@@ -69969,6 +69397,10 @@
 					Chart.scaleService.addScalesToLayout(this);
 				},
 
+				updateLayout: function() {
+					Chart.layoutService.update(this, this.chart.width, this.chart.height);
+				},
+
 				buildOrUpdateControllers: function() {
 					var me = this;
 					var types = [];
@@ -70004,6 +69436,7 @@
 
 				/**
 				 * Reset the elements of all datasets
+				 * @method resetElements
 				 * @private
 				 */
 				resetElements: function() {
@@ -70015,6 +69448,7 @@
 
 				/**
 				* Resets the chart back to it's state before the initial animation
+				* @method reset
 				*/
 				reset: function() {
 					this.resetElements();
@@ -70023,12 +69457,7 @@
 
 				update: function(animationDuration, lazy) {
 					var me = this;
-
-					updateConfig(me);
-
-					if (plugins.notify(me, 'beforeUpdate') === false) {
-						return;
-					}
+					Chart.plugins.notify('beforeUpdate', [me]);
 
 					// In case the entire data object changed
 					me.tooltip._data = me.data;
@@ -70041,7 +69470,10 @@
 						me.getDatasetMeta(datasetIndex).controller.buildOrUpdateElements();
 					}, me);
 
-					me.updateLayout();
+					Chart.layoutService.update(me, me.chart.width, me.chart.height);
+
+					// Apply changes to the datasets that require the scales to have been calculated i.e BorderColor changes
+					Chart.plugins.notify('afterScaleUpdate', [me]);
 
 					// Can only reset the new controllers after the scales have been updated
 					helpers.each(newControllers, function(controller) {
@@ -70051,7 +69483,7 @@
 					me.updateDatasets();
 
 					// Do this before render so that any plugins that need final scale updates can use it
-					plugins.notify(me, 'afterUpdate');
+					Chart.plugins.notify('afterUpdate', [me]);
 
 					if (me._bufferedRender) {
 						me._bufferedRequest = {
@@ -70064,64 +69496,51 @@
 				},
 
 				/**
-				 * Updates the chart layout unless a plugin returns `false` to the `beforeLayout`
-				 * hook, in which case, plugins will not be called on `afterLayout`.
-				 * @private
+				 * @method beforeDatasetsUpdate
+				 * @description Called before all datasets are updated. If a plugin returns false,
+				 * the datasets update will be cancelled until another chart update is triggered.
+				 * @param {Object} instance the chart instance being updated.
+				 * @returns {Boolean} false to cancel the datasets update.
+				 * @memberof Chart.PluginBase
+				 * @since version 2.1.5
+				 * @instance
 				 */
-				updateLayout: function() {
-					var me = this;
-
-					if (plugins.notify(me, 'beforeLayout') === false) {
-						return;
-					}
-
-					Chart.layoutService.update(this, this.chart.width, this.chart.height);
-
-					/**
-					 * Provided for backward compatibility, use `afterLayout` instead.
-					 * @method IPlugin#afterScaleUpdate
-					 * @deprecated since version 2.5.0
-					 * @todo remove at version 3
-					 */
-					plugins.notify(me, 'afterScaleUpdate');
-					plugins.notify(me, 'afterLayout');
-				},
 
 				/**
-				 * Updates all datasets unless a plugin returns `false` to the `beforeDatasetsUpdate`
-				 * hook, in which case, plugins will not be called on `afterDatasetsUpdate`.
-				 * @private
+				 * @method afterDatasetsUpdate
+				 * @description Called after all datasets have been updated. Note that this
+				 * extension will not be called if the datasets update has been cancelled.
+				 * @param {Object} instance the chart instance being updated.
+				 * @memberof Chart.PluginBase
+				 * @since version 2.1.5
+				 * @instance
+				 */
+
+				/**
+				 * Updates all datasets unless a plugin returns false to the beforeDatasetsUpdate
+				 * extension, in which case no datasets will be updated and the afterDatasetsUpdate
+				 * notification will be skipped.
+				 * @protected
+				 * @instance
 				 */
 				updateDatasets: function() {
 					var me = this;
+					var i, ilen;
 
-					if (plugins.notify(me, 'beforeDatasetsUpdate') === false) {
-						return;
+					if (Chart.plugins.notify('beforeDatasetsUpdate', [me])) {
+						for (i = 0, ilen = me.data.datasets.length; i < ilen; ++i) {
+							me.getDatasetMeta(i).controller.update();
+						}
+
+						Chart.plugins.notify('afterDatasetsUpdate', [me]);
 					}
-
-					for (var i = 0, ilen = me.data.datasets.length; i < ilen; ++i) {
-						me.getDatasetMeta(i).controller.update();
-					}
-
-					plugins.notify(me, 'afterDatasetsUpdate');
 				},
 
 				render: function(duration, lazy) {
 					var me = this;
-
-					if (plugins.notify(me, 'beforeRender') === false) {
-						return;
-					}
+					Chart.plugins.notify('beforeRender', [me]);
 
 					var animationOptions = me.options.animation;
-					var onComplete = function() {
-						plugins.notify(me, 'afterRender');
-						var callback = animationOptions && animationOptions.onComplete;
-						if (callback && callback.call) {
-							callback.call(me);
-						}
-					};
-
 					if (animationOptions && ((typeof duration !== 'undefined' && duration !== 0) || (typeof duration === 'undefined' && animationOptions.duration !== 0))) {
 						var animation = new Chart.Animation();
 						animation.numSteps = (duration || animationOptions.duration) / 16.66; // 60 fps
@@ -70138,67 +69557,48 @@
 
 						// user events
 						animation.onAnimationProgress = animationOptions.onProgress;
-						animation.onAnimationComplete = onComplete;
+						animation.onAnimationComplete = animationOptions.onComplete;
 
 						Chart.animationService.addAnimation(me, animation, duration, lazy);
 					} else {
 						me.draw();
-						onComplete();
+						if (animationOptions && animationOptions.onComplete && animationOptions.onComplete.call) {
+							animationOptions.onComplete.call(me);
+						}
 					}
-
 					return me;
 				},
 
-				draw: function(easingValue) {
+				draw: function(ease) {
 					var me = this;
-
+					var easingDecimal = ease || 1;
 					me.clear();
 
-					if (easingValue === undefined || easingValue === null) {
-						easingValue = 1;
-					}
-
-					if (plugins.notify(me, 'beforeDraw', [easingValue]) === false) {
-						return;
-					}
+					Chart.plugins.notify('beforeDraw', [me, easingDecimal]);
 
 					// Draw all the scales
 					helpers.each(me.boxes, function(box) {
 						box.draw(me.chartArea);
 					}, me);
-
 					if (me.scale) {
 						me.scale.draw();
 					}
 
-					me.drawDatasets(easingValue);
-
-					// Finally draw the tooltip
-					me.tooltip.transition(easingValue).draw();
-
-					plugins.notify(me, 'afterDraw', [easingValue]);
-				},
-
-				/**
-				 * Draws all datasets unless a plugin returns `false` to the `beforeDatasetsDraw`
-				 * hook, in which case, plugins will not be called on `afterDatasetsDraw`.
-				 * @private
-				 */
-				drawDatasets: function(easingValue) {
-					var me = this;
-
-					if (plugins.notify(me, 'beforeDatasetsDraw', [easingValue]) === false) {
-						return;
-					}
+					Chart.plugins.notify('beforeDatasetsDraw', [me, easingDecimal]);
 
 					// Draw each dataset via its respective controller (reversed to support proper line stacking)
 					helpers.each(me.data.datasets, function(dataset, datasetIndex) {
 						if (me.isDatasetVisible(datasetIndex)) {
-							me.getDatasetMeta(datasetIndex).controller.draw(easingValue);
+							me.getDatasetMeta(datasetIndex).controller.draw(ease);
 						}
 					}, me, true);
 
-					plugins.notify(me, 'afterDatasetsDraw', [easingValue]);
+					Chart.plugins.notify('afterDatasetsDraw', [me, easingDecimal]);
+
+					// Finally draw the tooltip
+					me.tooltip.transition(easingDecimal).draw();
+
+					Chart.plugins.notify('afterDraw', [me, easingDecimal]);
 				},
 
 				// Get the single element that was clicked on
@@ -70225,7 +69625,7 @@
 				},
 
 				getDatasetAtEvent: function(e) {
-					return Chart.Interaction.modes.dataset(this, e, {intersect: true});
+					return Chart.Interaction.modes.dataset(this, e);
 				},
 
 				getDatasetMeta: function(datasetIndex) {
@@ -70290,14 +69690,15 @@
 					}
 
 					if (canvas) {
-						me.unbindEvents();
+						helpers.unbindEvents(me, me.events);
+						helpers.removeResizeListener(canvas.parentNode);
 						helpers.clear(me.chart);
-						platform.releaseContext(me.chart.ctx);
+						releaseCanvas(canvas);
 						me.chart.canvas = null;
 						me.chart.ctx = null;
 					}
 
-					plugins.notify(me, 'destroy');
+					Chart.plugins.notify('destroy', [me]);
 
 					delete Chart.instances[me.id];
 				},
@@ -70317,48 +69718,10 @@
 					me.tooltip.initialize();
 				},
 
-				/**
-				 * @private
-				 */
 				bindEvents: function() {
 					var me = this;
-					var listeners = me._listeners = {};
-					var listener = function() {
-						me.eventHandler.apply(me, arguments);
-					};
-
-					helpers.each(me.options.events, function(type) {
-						platform.addEventListener(me, type, listener);
-						listeners[type] = listener;
-					});
-
-					// Responsiveness is currently based on the use of an iframe, however this method causes
-					// performance issues and could be troublesome when used with ad blockers. So make sure
-					// that the user is still able to create a chart without iframe when responsive is false.
-					// See https://github.com/chartjs/Chart.js/issues/2210
-					if (me.options.responsive) {
-						listener = function() {
-							me.resize();
-						};
-
-						platform.addEventListener(me, 'resize', listener);
-						listeners.resize = listener;
-					}
-				},
-
-				/**
-				 * @private
-				 */
-				unbindEvents: function() {
-					var me = this;
-					var listeners = me._listeners;
-					if (!listeners) {
-						return;
-					}
-
-					delete me._listeners;
-					helpers.each(listeners, function(listener, type) {
-						platform.removeEventListener(me, type, listener);
+					helpers.bindEvents(me, me.options.events, function(evt) {
+						me.eventHandler(evt);
 					});
 				},
 
@@ -70374,25 +69737,19 @@
 					}
 				},
 
-				/**
-				 * @private
-				 */
 				eventHandler: function(e) {
 					var me = this;
+					var legend = me.legend;
 					var tooltip = me.tooltip;
-
-					if (plugins.notify(me, 'beforeEvent', [e]) === false) {
-						return;
-					}
+					var hoverOptions = me.options.hover;
 
 					// Buffer any update calls so that renders do not occur
 					me._bufferedRender = true;
 					me._bufferedRequest = null;
 
 					var changed = me.handleEvent(e);
+					changed |= legend && legend.handleEvent(e);
 					changed |= tooltip && tooltip.handleEvent(e);
-
-					plugins.notify(me, 'afterEvent', [e]);
 
 					var bufferedRequest = me._bufferedRequest;
 					if (bufferedRequest) {
@@ -70404,7 +69761,7 @@
 
 						// We only need to render at this point. Updating will cause scales to be
 						// recomputed generating flicker & using more memory than necessary.
-						me.render(me.options.hover.animationDuration, true);
+						me.render(hoverOptions.animationDuration, true);
 					}
 
 					me._bufferedRender = false;
@@ -70416,7 +69773,7 @@
 				/**
 				 * Handle an event
 				 * @private
-				 * @param {IEvent} event the event to handle
+				 * param e {Event} the event to handle
 				 * @return {Boolean} true if the chart needs to re-render
 				 */
 				handleEvent: function(e) {
@@ -70436,14 +69793,12 @@
 
 					// On Hover hook
 					if (hoverOptions.onHover) {
-						// Need to call with native event here to not break backwards compatibility
-						hoverOptions.onHover.call(me, e.native, me.active);
+						hoverOptions.onHover.call(me, me.active);
 					}
 
 					if (e.type === 'mouseup' || e.type === 'click') {
 						if (options.onClick) {
-							// Use e.native here for backwards compatibility
-							options.onClick.call(me, e.native, me.active);
+							options.onClick.call(me, e, me.active);
 						}
 					}
 
@@ -70469,7 +69824,7 @@
 
 
 	/***/ },
-	/* 19 */
+	/* 16 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -70784,7 +70139,7 @@
 
 
 	/***/ },
-	/* 20 */
+	/* 17 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -70937,36 +70292,15 @@
 						minBoxSizes.push({
 							horizontal: isHorizontal,
 							minSize: minSize,
-							box: box,
+							box: box
 						});
 					}
 
 					helpers.each(leftBoxes.concat(rightBoxes, topBoxes, bottomBoxes), getMinimumBoxSize);
 
-					// If a horizontal box has padding, we move the left boxes over to avoid ugly charts (see issue #2478)
-					var maxHorizontalLeftPadding = 0;
-					var maxHorizontalRightPadding = 0;
-					var maxVerticalTopPadding = 0;
-					var maxVerticalBottomPadding = 0;
-
-					helpers.each(topBoxes.concat(bottomBoxes), function(horizontalBox) {
-						if (horizontalBox.getPadding) {
-							var boxPadding = horizontalBox.getPadding();
-							maxHorizontalLeftPadding = Math.max(maxHorizontalLeftPadding, boxPadding.left);
-							maxHorizontalRightPadding = Math.max(maxHorizontalRightPadding, boxPadding.right);
-						}
-					});
-
-					helpers.each(leftBoxes.concat(rightBoxes), function(verticalBox) {
-						if (verticalBox.getPadding) {
-							var boxPadding = verticalBox.getPadding();
-							maxVerticalTopPadding = Math.max(maxVerticalTopPadding, boxPadding.top);
-							maxVerticalBottomPadding = Math.max(maxVerticalBottomPadding, boxPadding.bottom);
-						}
-					});
-
 					// At this point, maxChartAreaHeight and maxChartAreaWidth are the size the chart area could
 					// be if the axes are drawn at their minimum sizes.
+
 					// Steps 5 & 6
 					var totalLeftBoxesWidth = leftPadding;
 					var totalRightBoxesWidth = rightPadding;
@@ -70982,8 +70316,8 @@
 						if (minBoxSize) {
 							if (box.isHorizontal()) {
 								var scaleMargin = {
-									left: Math.max(totalLeftBoxesWidth, maxHorizontalLeftPadding),
-									right: Math.max(totalRightBoxesWidth, maxHorizontalRightPadding),
+									left: totalLeftBoxesWidth,
+									right: totalRightBoxesWidth,
 									top: 0,
 									bottom: 0
 								};
@@ -71061,15 +70395,6 @@
 						totalBottomBoxesHeight += box.height;
 					});
 
-					// We may be adding some padding to account for rotated x axis labels
-					var leftPaddingAddition = Math.max(maxHorizontalLeftPadding - totalLeftBoxesWidth, 0);
-					totalLeftBoxesWidth += leftPaddingAddition;
-					totalRightBoxesWidth += Math.max(maxHorizontalRightPadding - totalRightBoxesWidth, 0);
-
-					var topPaddingAddition = Math.max(maxVerticalTopPadding - totalTopBoxesHeight, 0);
-					totalTopBoxesHeight += topPaddingAddition;
-					totalBottomBoxesHeight += Math.max(maxVerticalBottomPadding - totalBottomBoxesHeight, 0);
-
 					// Figure out if our chart area changed. This would occur if the dataset layout label rotation
 					// changed due to the application of the margins in step 6. Since we can only get bigger, this is safe to do
 					// without calling `fit` again
@@ -71102,8 +70427,8 @@
 					}
 
 					// Step 7 - Position the boxes
-					var left = leftPadding + leftPaddingAddition;
-					var top = topPadding + topPaddingAddition;
+					var left = leftPadding;
+					var top = topPadding;
 
 					function placeBox(box) {
 						if (box.isHorizontal()) {
@@ -71159,7 +70484,7 @@
 
 
 	/***/ },
-	/* 21 */
+	/* 18 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -71205,7 +70530,142 @@
 
 
 	/***/ },
-	/* 22 */
+	/* 19 */
+	/***/ function(module, exports) {
+
+		'use strict';
+
+		module.exports = function(Chart) {
+
+			var noop = Chart.helpers.noop;
+
+			/**
+			 * The plugin service singleton
+			 * @namespace Chart.plugins
+			 * @since 2.1.0
+			 */
+			Chart.plugins = {
+				_plugins: [],
+
+				/**
+				 * Registers the given plugin(s) if not already registered.
+				 * @param {Array|Object} plugins plugin instance(s).
+				 */
+				register: function(plugins) {
+					var p = this._plugins;
+					([]).concat(plugins).forEach(function(plugin) {
+						if (p.indexOf(plugin) === -1) {
+							p.push(plugin);
+						}
+					});
+				},
+
+				/**
+				 * Unregisters the given plugin(s) only if registered.
+				 * @param {Array|Object} plugins plugin instance(s).
+				 */
+				unregister: function(plugins) {
+					var p = this._plugins;
+					([]).concat(plugins).forEach(function(plugin) {
+						var idx = p.indexOf(plugin);
+						if (idx !== -1) {
+							p.splice(idx, 1);
+						}
+					});
+				},
+
+				/**
+				 * Remove all registered plugins.
+				 * @since 2.1.5
+				 */
+				clear: function() {
+					this._plugins = [];
+				},
+
+				/**
+				 * Returns the number of registered plugins?
+				 * @returns {Number}
+				 * @since 2.1.5
+				 */
+				count: function() {
+					return this._plugins.length;
+				},
+
+				/**
+				 * Returns all registered plugin instances.
+				 * @returns {Array} array of plugin objects.
+				 * @since 2.1.5
+				 */
+				getAll: function() {
+					return this._plugins;
+				},
+
+				/**
+				 * Calls registered plugins on the specified extension, with the given args. This
+				 * method immediately returns as soon as a plugin explicitly returns false. The
+				 * returned value can be used, for instance, to interrupt the current action.
+				 * @param {String} extension the name of the plugin method to call (e.g. 'beforeUpdate').
+				 * @param {Array} [args] extra arguments to apply to the extension call.
+				 * @returns {Boolean} false if any of the plugins return false, else returns true.
+				 */
+				notify: function(extension, args) {
+					var plugins = this._plugins;
+					var ilen = plugins.length;
+					var i, plugin;
+
+					for (i=0; i<ilen; ++i) {
+						plugin = plugins[i];
+						if (typeof plugin[extension] === 'function') {
+							if (plugin[extension].apply(plugin, args || []) === false) {
+								return false;
+							}
+						}
+					}
+
+					return true;
+				}
+			};
+
+			/**
+			 * Plugin extension methods.
+			 * @interface Chart.PluginBase
+			 * @since 2.1.0
+			 */
+			Chart.PluginBase = Chart.Element.extend({
+				// Called at start of chart init
+				beforeInit: noop,
+
+				// Called at end of chart init
+				afterInit: noop,
+
+				// Called at start of update
+				beforeUpdate: noop,
+
+				// Called at end of update
+				afterUpdate: noop,
+
+				// Called at start of draw
+				beforeDraw: noop,
+
+				// Called at end of draw
+				afterDraw: noop,
+
+				// Called during destroy
+				destroy: noop
+			});
+
+			/**
+			 * Provided for backward compatibility, use Chart.plugins instead
+			 * @namespace Chart.pluginService
+			 * @deprecated since version 2.1.5
+			 * @todo remove me at version 3
+			 */
+			Chart.pluginService = Chart.plugins;
+		};
+
+
+	/***/ },
+	/* 20 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -71277,8 +70737,8 @@
 
 						// If min, max and stepSize is set and they make an evenly spaced scale use it.
 						if (generationOptions.min && generationOptions.max && generationOptions.stepSize) {
-							// If very close to our whole number, use it.
-							if (helpers.almostWhole((generationOptions.max - generationOptions.min) / generationOptions.stepSize, spacing / 1000)) {
+							var minMaxDeltaDivisibleByStepSize = ((generationOptions.max - generationOptions.min) % generationOptions.stepSize) === 0;
+							if (minMaxDeltaDivisibleByStepSize) {
 								niceMin = generationOptions.min;
 								niceMax = generationOptions.max;
 							}
@@ -71319,33 +70779,27 @@
 						// the graph
 						var tickVal = getValueOrDefault(generationOptions.min, Math.pow(10, Math.floor(helpers.log10(dataRange.min))));
 
-						var endExp = Math.floor(helpers.log10(dataRange.max));
-						var endSignificand = Math.ceil(dataRange.max / Math.pow(10, endExp));
-						var exp;
-						var significand;
-
-						if (tickVal === 0) {
-							exp = Math.floor(helpers.log10(dataRange.minNotZero));
-							significand = Math.floor(dataRange.minNotZero / Math.pow(10, exp));
-
-							ticks.push(tickVal);
-							tickVal = significand * Math.pow(10, exp);
-						} else {
-							exp = Math.floor(helpers.log10(tickVal));
-							significand = Math.floor(tickVal / Math.pow(10, exp));
-						}
-
-						do {
+						while (tickVal < dataRange.max) {
 							ticks.push(tickVal);
 
-							++significand;
+							var exp;
+							var significand;
+
+							if (tickVal === 0) {
+								exp = Math.floor(helpers.log10(dataRange.minNotZero));
+								significand = Math.round(dataRange.minNotZero / Math.pow(10, exp));
+							} else {
+								exp = Math.floor(helpers.log10(tickVal));
+								significand = Math.floor(tickVal / Math.pow(10, exp)) + 1;
+							}
+
 							if (significand === 10) {
 								significand = 1;
 								++exp;
 							}
 
 							tickVal = significand * Math.pow(10, exp);
-						} while (exp < endExp || (exp === endExp && significand < endSignificand));
+						}
 
 						var lastTick = getValueOrDefault(generationOptions.max, tickVal);
 						ticks.push(lastTick);
@@ -71419,7 +70873,7 @@
 
 
 	/***/ },
-	/* 23 */
+	/* 21 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -71463,7 +70917,7 @@
 					minRotation: 0,
 					maxRotation: 50,
 					mirror: false,
-					padding: 0,
+					padding: 10,
 					reverse: false,
 					display: true,
 					autoSkip: true,
@@ -71474,45 +70928,9 @@
 				}
 			};
 
-			function computeTextSize(context, tick, font) {
-				return helpers.isArray(tick) ?
-					helpers.longestText(context, font, tick) :
-					context.measureText(tick).width;
-			}
-
-			function parseFontOptions(options) {
-				var getValueOrDefault = helpers.getValueOrDefault;
-				var globalDefaults = Chart.defaults.global;
-				var size = getValueOrDefault(options.fontSize, globalDefaults.defaultFontSize);
-				var style = getValueOrDefault(options.fontStyle, globalDefaults.defaultFontStyle);
-				var family = getValueOrDefault(options.fontFamily, globalDefaults.defaultFontFamily);
-
-				return {
-					size: size,
-					style: style,
-					family: family,
-					font: helpers.fontString(size, style, family)
-				};
-			}
-
 			Chart.Scale = Chart.Element.extend({
-				/**
-				 * Get the padding needed for the scale
-				 * @method getPadding
-				 * @private
-				 * @returns {Padding} the necessary padding
-				 */
-				getPadding: function() {
-					var me = this;
-					return {
-						left: me.paddingLeft || 0,
-						top: me.paddingTop || 0,
-						right: me.paddingRight || 0,
-						bottom: me.paddingBottom || 0
-					};
-				},
 
-				// These methods are ordered by lifecyle. Utilities then follow.
+				// These methods are ordered by lifecycle. Utilities then follow.
 				// Any function defined here is inherited by all scale types.
 				// Any function can be extended by the scale type
 
@@ -71534,7 +70952,6 @@
 						top: 0,
 						bottom: 0
 					}, margins);
-					me.longestTextCache = me.longestTextCache || {};
 
 					// Dimensions
 					me.beforeSetDimensions();
@@ -71643,42 +71060,72 @@
 				calculateTickRotation: function() {
 					var me = this;
 					var context = me.ctx;
-					var tickOpts = me.options.ticks;
+					var globalDefaults = Chart.defaults.global;
+					var optionTicks = me.options.ticks;
 
 					// Get the width of each grid by calculating the difference
 					// between x offsets between 0 and 1.
-					var tickFont = parseFontOptions(tickOpts);
-					context.font = tickFont.font;
+					var tickFontSize = helpers.getValueOrDefault(optionTicks.fontSize, globalDefaults.defaultFontSize);
+					var tickFontStyle = helpers.getValueOrDefault(optionTicks.fontStyle, globalDefaults.defaultFontStyle);
+					var tickFontFamily = helpers.getValueOrDefault(optionTicks.fontFamily, globalDefaults.defaultFontFamily);
+					var tickLabelFont = helpers.fontString(tickFontSize, tickFontStyle, tickFontFamily);
+					context.font = tickLabelFont;
 
-					var labelRotation = tickOpts.minRotation || 0;
+					var firstWidth = context.measureText(me.ticks[0]).width;
+					var lastWidth = context.measureText(me.ticks[me.ticks.length - 1]).width;
+					var firstRotated;
 
-					if (me.options.display && me.isHorizontal()) {
-						var originalLabelWidth = helpers.longestText(context, tickFont.font, me.ticks, me.longestTextCache);
-						var labelWidth = originalLabelWidth;
-						var cosRotation;
-						var sinRotation;
+					me.labelRotation = optionTicks.minRotation || 0;
+					me.paddingRight = 0;
+					me.paddingLeft = 0;
 
-						// Allow 3 pixels x2 padding either side for label readability
-						var tickWidth = me.getPixelForTick(1) - me.getPixelForTick(0) - 6;
+					if (me.options.display) {
+						if (me.isHorizontal()) {
+							me.paddingRight = lastWidth / 2 + 3;
+							me.paddingLeft = firstWidth / 2 + 3;
 
-						// Max label rotation can be set or default to 90 - also act as a loop counter
-						while (labelWidth > tickWidth && labelRotation < tickOpts.maxRotation) {
-							var angleRadians = helpers.toRadians(labelRotation);
-							cosRotation = Math.cos(angleRadians);
-							sinRotation = Math.sin(angleRadians);
-
-							if (sinRotation * originalLabelWidth > me.maxHeight) {
-								// go back one step
-								labelRotation--;
-								break;
+							if (!me.longestTextCache) {
+								me.longestTextCache = {};
 							}
+							var originalLabelWidth = helpers.longestText(context, tickLabelFont, me.ticks, me.longestTextCache);
+							var labelWidth = originalLabelWidth;
+							var cosRotation;
+							var sinRotation;
 
-							labelRotation++;
-							labelWidth = cosRotation * originalLabelWidth;
+							// Allow 3 pixels x2 padding either side for label readability
+							// only the index matters for a dataset scale, but we want a consistent interface between scales
+							var tickWidth = me.getPixelForTick(1) - me.getPixelForTick(0) - 6;
+
+							// Max label rotation can be set or default to 90 - also act as a loop counter
+							while (labelWidth > tickWidth && me.labelRotation < optionTicks.maxRotation) {
+								cosRotation = Math.cos(helpers.toRadians(me.labelRotation));
+								sinRotation = Math.sin(helpers.toRadians(me.labelRotation));
+
+								firstRotated = cosRotation * firstWidth;
+
+								// We're right aligning the text now.
+								if (firstRotated + tickFontSize / 2 > me.yLabelWidth) {
+									me.paddingLeft = firstRotated + tickFontSize / 2;
+								}
+
+								me.paddingRight = tickFontSize / 2;
+
+								if (sinRotation * originalLabelWidth > me.maxHeight) {
+									// go back one step
+									me.labelRotation--;
+									break;
+								}
+
+								me.labelRotation++;
+								labelWidth = cosRotation * originalLabelWidth;
+							}
 						}
 					}
 
-					me.labelRotation = labelRotation;
+					if (me.margins) {
+						me.paddingLeft = Math.max(me.paddingLeft - me.margins.left, 0);
+						me.paddingRight = Math.max(me.paddingRight - me.margins.right, 0);
+					}
 				},
 				afterCalculateTickRotation: function() {
 					helpers.callCallback(this.options.afterCalculateTickRotation, [this]);
@@ -71698,14 +71145,20 @@
 					};
 
 					var opts = me.options;
+					var globalDefaults = Chart.defaults.global;
 					var tickOpts = opts.ticks;
 					var scaleLabelOpts = opts.scaleLabel;
 					var gridLineOpts = opts.gridLines;
 					var display = opts.display;
 					var isHorizontal = me.isHorizontal();
 
-					var tickFont = parseFontOptions(tickOpts);
-					var scaleLabelFontSize = parseFontOptions(scaleLabelOpts).size * 1.5;
+					var tickFontSize = helpers.getValueOrDefault(tickOpts.fontSize, globalDefaults.defaultFontSize);
+					var tickFontStyle = helpers.getValueOrDefault(tickOpts.fontStyle, globalDefaults.defaultFontStyle);
+					var tickFontFamily = helpers.getValueOrDefault(tickOpts.fontFamily, globalDefaults.defaultFontFamily);
+					var tickLabelFont = helpers.fontString(tickFontSize, tickFontStyle, tickFontFamily);
+
+					var scaleLabelFontSize = helpers.getValueOrDefault(scaleLabelOpts.fontSize, globalDefaults.defaultFontSize);
+
 					var tickMarkLength = opts.gridLines.tickMarkLength;
 
 					// Width
@@ -71726,84 +71179,78 @@
 					// Are we showing a title for the scale?
 					if (scaleLabelOpts.display && display) {
 						if (isHorizontal) {
-							minSize.height += scaleLabelFontSize;
+							minSize.height += (scaleLabelFontSize * 1.5);
 						} else {
-							minSize.width += scaleLabelFontSize;
+							minSize.width += (scaleLabelFontSize * 1.5);
 						}
 					}
 
-					// Don't bother fitting the ticks if we are not showing them
 					if (tickOpts.display && display) {
-						var largestTextWidth = helpers.longestText(me.ctx, tickFont.font, me.ticks, me.longestTextCache);
+						// Don't bother fitting the ticks if we are not showing them
+						if (!me.longestTextCache) {
+							me.longestTextCache = {};
+						}
+
+						var largestTextWidth = helpers.longestText(me.ctx, tickLabelFont, me.ticks, me.longestTextCache);
 						var tallestLabelHeightInLines = helpers.numberOfLabelLines(me.ticks);
-						var lineSpace = tickFont.size * 0.5;
+						var lineSpace = tickFontSize * 0.5;
 
 						if (isHorizontal) {
 							// A horizontal axis is more constrained by the height.
 							me.longestLabelWidth = largestTextWidth;
 
-							var angleRadians = helpers.toRadians(me.labelRotation);
-							var cosRotation = Math.cos(angleRadians);
-							var sinRotation = Math.sin(angleRadians);
-
 							// TODO - improve this calculation
-							var labelHeight = (sinRotation * largestTextWidth)
-								+ (tickFont.size * tallestLabelHeightInLines)
-								+ (lineSpace * tallestLabelHeightInLines);
+							var labelHeight = (Math.sin(helpers.toRadians(me.labelRotation)) * me.longestLabelWidth) + (tickFontSize * tallestLabelHeightInLines) + (lineSpace * tallestLabelHeightInLines);
 
 							minSize.height = Math.min(me.maxHeight, minSize.height + labelHeight);
-							me.ctx.font = tickFont.font;
+							me.ctx.font = tickLabelFont;
 
-							var firstTick = me.ticks[0];
-							var firstLabelWidth = computeTextSize(me.ctx, firstTick, tickFont.font);
-
-							var lastTick = me.ticks[me.ticks.length - 1];
-							var lastLabelWidth = computeTextSize(me.ctx, lastTick, tickFont.font);
+							var firstLabelWidth = me.ctx.measureText(me.ticks[0]).width;
+							var lastLabelWidth = me.ctx.measureText(me.ticks[me.ticks.length - 1]).width;
 
 							// Ensure that our ticks are always inside the canvas. When rotated, ticks are right aligned which means that the right padding is dominated
 							// by the font height
-							if (me.labelRotation !== 0) {
-								me.paddingLeft = opts.position === 'bottom'? (cosRotation * firstLabelWidth) + 3: (cosRotation * lineSpace) + 3; // add 3 px to move away from canvas edges
-								me.paddingRight = opts.position === 'bottom'? (cosRotation * lineSpace) + 3: (cosRotation * lastLabelWidth) + 3;
-							} else {
-								me.paddingLeft = firstLabelWidth / 2 + 3; // add 3 px to move away from canvas edges
-								me.paddingRight = lastLabelWidth / 2 + 3;
-							}
+							var cosRotation = Math.cos(helpers.toRadians(me.labelRotation));
+							var sinRotation = Math.sin(helpers.toRadians(me.labelRotation));
+							me.paddingLeft = me.labelRotation !== 0 ? (cosRotation * firstLabelWidth) + 3 : firstLabelWidth / 2 + 3; // add 3 px to move away from canvas edges
+							me.paddingRight = me.labelRotation !== 0 ? (sinRotation * (tickFontSize / 2)) + 3 : lastLabelWidth / 2 + 3; // when rotated
 						} else {
 							// A vertical axis is more constrained by the width. Labels are the dominant factor here, so get that length first
-							// Account for padding
+							var maxLabelWidth = me.maxWidth - minSize.width;
 
-							if (tickOpts.mirror) {
-								largestTextWidth = 0;
-							} else {
+							// Account for padding
+							var mirror = tickOpts.mirror;
+							if (!mirror) {
 								largestTextWidth += me.options.ticks.padding;
+							} else {
+								// If mirrored text is on the inside so don't expand
+								largestTextWidth = 0;
 							}
-							minSize.width += largestTextWidth;
-							me.paddingTop = tickFont.size / 2;
-							me.paddingBottom = tickFont.size / 2;
+
+							if (largestTextWidth < maxLabelWidth) {
+								// We don't need all the room
+								minSize.width += largestTextWidth;
+							} else {
+								// Expand to max size
+								minSize.width = me.maxWidth;
+							}
+
+							me.paddingTop = tickFontSize / 2;
+							me.paddingBottom = tickFontSize / 2;
 						}
 					}
 
-					me.handleMargins();
-
-					me.width = minSize.width;
-					me.height = minSize.height;
-				},
-
-				/**
-				 * Handle margins and padding interactions
-				 * @private
-				 */
-				handleMargins: function() {
-					var me = this;
 					if (me.margins) {
 						me.paddingLeft = Math.max(me.paddingLeft - me.margins.left, 0);
 						me.paddingTop = Math.max(me.paddingTop - me.margins.top, 0);
 						me.paddingRight = Math.max(me.paddingRight - me.margins.right, 0);
 						me.paddingBottom = Math.max(me.paddingBottom - me.margins.bottom, 0);
 					}
-				},
 
+					me.width = minSize.width;
+					me.height = minSize.height;
+
+				},
 				afterFit: function() {
 					helpers.callCallback(this.options.afterFit, [this]);
 				},
@@ -71883,18 +71330,15 @@
 				},
 
 				getBasePixel: function() {
-					return this.getPixelForValue(this.getBaseValue());
-				},
-
-				getBaseValue: function() {
 					var me = this;
 					var min = me.min;
 					var max = me.max;
 
-					return me.beginAtZero ? 0:
+					return me.getPixelForValue(
+						me.beginAtZero? 0:
 						min < 0 && max < 0? max :
 						min > 0 && max > 0? min :
-						0;
+						0);
 				},
 
 				// Actually draw the scale on the canvas
@@ -71924,14 +71368,19 @@
 					}
 
 					var tickFontColor = helpers.getValueOrDefault(optionTicks.fontColor, globalDefaults.defaultFontColor);
-					var tickFont = parseFontOptions(optionTicks);
-
-					var tl = gridLines.drawTicks ? gridLines.tickMarkLength : 0;
+					var tickFontSize = helpers.getValueOrDefault(optionTicks.fontSize, globalDefaults.defaultFontSize);
+					var tickFontStyle = helpers.getValueOrDefault(optionTicks.fontStyle, globalDefaults.defaultFontStyle);
+					var tickFontFamily = helpers.getValueOrDefault(optionTicks.fontFamily, globalDefaults.defaultFontFamily);
+					var tickLabelFont = helpers.fontString(tickFontSize, tickFontStyle, tickFontFamily);
+					var tl = gridLines.tickMarkLength;
 					var borderDash = helpers.getValueOrDefault(gridLines.borderDash, globalDefaults.borderDash);
 					var borderDashOffset = helpers.getValueOrDefault(gridLines.borderDashOffset, globalDefaults.borderDashOffset);
 
 					var scaleLabelFontColor = helpers.getValueOrDefault(scaleLabel.fontColor, globalDefaults.defaultFontColor);
-					var scaleLabelFont = parseFontOptions(scaleLabel);
+					var scaleLabelFontSize = helpers.getValueOrDefault(scaleLabel.fontSize, globalDefaults.defaultFontSize);
+					var scaleLabelFontStyle = helpers.getValueOrDefault(scaleLabel.fontStyle, globalDefaults.defaultFontStyle);
+					var scaleLabelFontFamily = helpers.getValueOrDefault(scaleLabel.fontFamily, globalDefaults.defaultFontFamily);
+					var scaleLabelFont = helpers.fontString(scaleLabelFontSize, scaleLabelFontStyle, scaleLabelFontFamily);
 
 					var labelRotationRadians = helpers.toRadians(me.labelRotation);
 					var cosRotation = Math.cos(labelRotationRadians);
@@ -72007,21 +71456,15 @@
 						var textBaseline = 'middle';
 
 						if (isHorizontal) {
-
-							if (options.position === 'bottom') {
-								// bottom
-								textBaseline = !isRotated? 'top':'middle';
-								textAlign = !isRotated? 'center': 'right';
-								labelY = me.top + tl;
-							} else {
-								// top
-								textBaseline = !isRotated? 'bottom':'middle';
-								textAlign = !isRotated? 'center': 'left';
-								labelY = me.bottom - tl;
+							if (!isRotated) {
+								textBaseline = options.position === 'top' ? 'bottom' : 'top';
 							}
+
+							textAlign = isRotated ? 'right' : 'center';
 
 							var xLineValue = me.getPixelForTick(index) + helpers.aliasPixel(lineWidth); // xvalues for grid lines
 							labelX = me.getPixelForTick(index, gridLines.offsetGridLines) + optionTicks.labelOffset; // x values for optionTicks (need to consider offsetLabel option)
+							labelY = (isRotated) ? me.top + 12 : options.position === 'top' ? me.bottom - tl : me.top + tl;
 
 							tx1 = tx2 = x1 = x2 = xLineValue;
 							ty1 = yTickStart;
@@ -72029,19 +71472,22 @@
 							y1 = chartArea.top;
 							y2 = chartArea.bottom;
 						} else {
-							var isLeft = options.position === 'left';
-							var tickPadding = optionTicks.padding;
-							var labelXOffset;
-
-							if (optionTicks.mirror) {
-								textAlign = isLeft ? 'left' : 'right';
-								labelXOffset = tickPadding;
+							if (options.position === 'left') {
+								if (optionTicks.mirror) {
+									labelX = me.right + optionTicks.padding;
+									textAlign = 'left';
+								} else {
+									labelX = me.right - optionTicks.padding;
+									textAlign = 'right';
+								}
+							// right side
+							} else if (optionTicks.mirror) {
+								labelX = me.left - optionTicks.padding;
+								textAlign = 'right';
 							} else {
-								textAlign = isLeft ? 'right' : 'left';
-								labelXOffset = tl + tickPadding;
+								labelX = me.left + optionTicks.padding;
+								textAlign = 'left';
 							}
-
-							labelX = isLeft ? me.right - labelXOffset : me.left + labelXOffset;
 
 							var yLineValue = me.getPixelForTick(index); // xvalues for grid lines
 							yLineValue += helpers.aliasPixel(lineWidth);
@@ -72107,17 +71553,17 @@
 							context.save();
 							context.translate(itemToDraw.labelX, itemToDraw.labelY);
 							context.rotate(itemToDraw.rotation);
-							context.font = tickFont.font;
+							context.font = tickLabelFont;
 							context.textBaseline = itemToDraw.textBaseline;
 							context.textAlign = itemToDraw.textAlign;
 
 							var label = itemToDraw.label;
 							if (helpers.isArray(label)) {
-								for (var i = 0, y = 0; i < label.length; ++i) {
+								for (var i = 0, y = -(label.length - 1)*tickFontSize*0.75; i < label.length; ++i) {
 									// We just make sure the multiline element is a string here..
 									context.fillText('' + label[i], 0, y);
 									// apply same lineSpacing as calculated @ L#320
-									y += (tickFont.size * 1.5);
+									y += (tickFontSize * 1.5);
 								}
 							} else {
 								context.fillText(label, 0, 0);
@@ -72134,10 +71580,10 @@
 
 						if (isHorizontal) {
 							scaleLabelX = me.left + ((me.right - me.left) / 2); // midpoint of the width
-							scaleLabelY = options.position === 'bottom' ? me.bottom - (scaleLabelFont.size / 2) : me.top + (scaleLabelFont.size / 2);
+							scaleLabelY = options.position === 'bottom' ? me.bottom - (scaleLabelFontSize / 2) : me.top + (scaleLabelFontSize / 2);
 						} else {
 							var isLeft = options.position === 'left';
-							scaleLabelX = isLeft ? me.left + (scaleLabelFont.size / 2) : me.right - (scaleLabelFont.size / 2);
+							scaleLabelX = isLeft ? me.left + (scaleLabelFontSize / 2) : me.right - (scaleLabelFontSize / 2);
 							scaleLabelY = me.top + ((me.bottom - me.top) / 2);
 							rotation = isLeft ? -0.5 * Math.PI : 0.5 * Math.PI;
 						}
@@ -72148,7 +71594,7 @@
 						context.textAlign = 'center';
 						context.textBaseline = 'middle';
 						context.fillStyle = scaleLabelFontColor; // render in correct colour
-						context.font = scaleLabelFont.font;
+						context.font = scaleLabelFont;
 						context.fillText(scaleLabel.labelString, 0, 0);
 						context.restore();
 					}
@@ -72184,7 +71630,7 @@
 
 
 	/***/ },
-	/* 24 */
+	/* 22 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -72211,6 +71657,7 @@
 				initialize: function(config) {
 					var me = this;
 					helpers.extend(me, config);
+					me.options = helpers.configMerge(Chart.defaults.global.title, config.options);
 
 					// Contains hit boxes for each dataset (in dataset order)
 					me.legendHitBoxes = [];
@@ -72218,7 +71665,12 @@
 
 				// These methods are ordered by lifecycle. Utilities then follow.
 
-				beforeUpdate: noop,
+				beforeUpdate: function() {
+					var chartOpts = this.chart.options;
+					if (chartOpts && chartOpts.title) {
+						this.options = helpers.configMerge(Chart.defaults.global.title, chartOpts.title);
+					}
+				},
 				update: function(maxWidth, maxHeight, margins) {
 					var me = this;
 
@@ -72370,39 +71822,20 @@
 				}
 			});
 
-			function createNewTitleBlockAndAttach(chartInstance, titleOpts) {
-				var title = new Chart.Title({
-					ctx: chartInstance.chart.ctx,
-					options: titleOpts,
-					chart: chartInstance
-				});
-				chartInstance.titleBlock = title;
-				Chart.layoutService.addBox(chartInstance, title);
-			}
-
 			// Register the title plugin
 			Chart.plugins.register({
 				beforeInit: function(chartInstance) {
-					var titleOpts = chartInstance.options.title;
+					var opts = chartInstance.options;
+					var titleOpts = opts.title;
 
 					if (titleOpts) {
-						createNewTitleBlockAndAttach(chartInstance, titleOpts);
-					}
-				},
-				beforeUpdate: function(chartInstance) {
-					var titleOpts = chartInstance.options.title;
+						chartInstance.titleBlock = new Chart.Title({
+							ctx: chartInstance.chart.ctx,
+							options: titleOpts,
+							chart: chartInstance
+						});
 
-					if (titleOpts) {
-						titleOpts = helpers.configMerge(Chart.defaults.global.title, titleOpts);
-
-						if (chartInstance.titleBlock) {
-							chartInstance.titleBlock.options = titleOpts;
-						} else {
-							createNewTitleBlockAndAttach(chartInstance, titleOpts);
-						}
-					} else {
-						Chart.layoutService.removeBox(chartInstance, chartInstance.titleBlock);
-						delete chartInstance.titleBlock;
+						Chart.layoutService.addBox(chartInstance, chartInstance.titleBlock);
 					}
 				}
 			});
@@ -72410,7 +71843,7 @@
 
 
 	/***/ },
-	/* 25 */
+	/* 23 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -72577,20 +72010,10 @@
 				beforeBuildLabels: noop,
 				buildLabels: function() {
 					var me = this;
-					var labelOpts = me.options.labels;
-					var legendItems = labelOpts.generateLabels.call(me, me.chart);
-
-					if (labelOpts.filter) {
-						legendItems = legendItems.filter(function(item) {
-							return labelOpts.filter(item, me.chart.data);
-						});
-					}
-
+					me.legendItems = me.options.labels.generateLabels.call(me, me.chart);
 					if (me.options.reverse) {
-						legendItems.reverse();
+						me.legendItems.reverse();
 					}
-
-					me.legendItems = legendItems;
 				},
 				afterBuildLabels: noop,
 
@@ -72829,7 +72252,7 @@
 								}
 							} else if (y + itemHeight > me.bottom) {
 								x = cursor.x = x + me.columnWidths[cursor.line] + labelOpts.padding;
-								y = cursor.y = me.top + labelOpts.padding;
+								y = cursor.y = me.top;
 								cursor.line++;
 							}
 
@@ -72854,7 +72277,7 @@
 				/**
 				 * Handle an event
 				 * @private
-				 * @param {IEvent} event - The event to handle
+				 * @param e {Event} the event to handle
 				 * @return {Boolean} true if a change occured
 				 */
 				handleEvent: function(e) {
@@ -72875,9 +72298,9 @@
 						return;
 					}
 
-					// Chart event already has relative position in it
-					var x = e.x,
-						y = e.y;
+					var position = helpers.getRelativePosition(e, me.chart.chart),
+						x = position.x,
+						y = position.y;
 
 					if (x >= me.left && x <= me.right && y >= me.top && y <= me.bottom) {
 						// See if we are touching one of the dataset boxes
@@ -72888,13 +72311,11 @@
 							if (x >= hitBox.left && x <= hitBox.left + hitBox.width && y >= hitBox.top && y <= hitBox.top + hitBox.height) {
 								// Touching an element
 								if (type === 'click') {
-									// use e.native for backwards compatibility
-									opts.onClick.call(me, e.native, me.legendItems[i]);
+									opts.onClick.call(me, e, me.legendItems[i]);
 									changed = true;
 									break;
 								} else if (type === 'mousemove') {
-									// use e.native for backwards compatibility
-									opts.onHover.call(me, e.native, me.legendItems[i]);
+									opts.onHover.call(me, e, me.legendItems[i]);
 									changed = true;
 									break;
 								}
@@ -72906,45 +72327,20 @@
 				}
 			});
 
-			function createNewLegendAndAttach(chartInstance, legendOpts) {
-				var legend = new Chart.Legend({
-					ctx: chartInstance.chart.ctx,
-					options: legendOpts,
-					chart: chartInstance
-				});
-				chartInstance.legend = legend;
-				Chart.layoutService.addBox(chartInstance, legend);
-			}
-
 			// Register the legend plugin
 			Chart.plugins.register({
 				beforeInit: function(chartInstance) {
-					var legendOpts = chartInstance.options.legend;
+					var opts = chartInstance.options;
+					var legendOpts = opts.legend;
 
 					if (legendOpts) {
-						createNewLegendAndAttach(chartInstance, legendOpts);
-					}
-				},
-				beforeUpdate: function(chartInstance) {
-					var legendOpts = chartInstance.options.legend;
+						chartInstance.legend = new Chart.Legend({
+							ctx: chartInstance.chart.ctx,
+							options: legendOpts,
+							chart: chartInstance
+						});
 
-					if (legendOpts) {
-						legendOpts = helpers.configMerge(Chart.defaults.global.legend, legendOpts);
-
-						if (chartInstance.legend) {
-							chartInstance.legend.options = legendOpts;
-						} else {
-							createNewLegendAndAttach(chartInstance, legendOpts);
-						}
-					} else {
-						Chart.layoutService.removeBox(chartInstance, chartInstance.legend);
-						delete chartInstance.legend;
-					}
-				},
-				afterEvent: function(chartInstance, e) {
-					var legend = chartInstance.legend;
-					if (legend) {
-						legend.handleEvent(e);
+						Chart.layoutService.addBox(chartInstance, chartInstance.legend);
 					}
 				}
 			});
@@ -72952,30 +72348,13 @@
 
 
 	/***/ },
-	/* 26 */
+	/* 24 */
 	/***/ function(module, exports) {
 
 		'use strict';
 
 		module.exports = function(Chart) {
 			var helpers = Chart.helpers;
-
-			/**
-			 * Helper function to get relative position for an event
-			 * @param {Event|IEvent} event - The event to get the position for
-			 * @param {Chart} chart - The chart
-			 * @returns {Point} the event position
-			 */
-			function getRelativePosition(e, chart) {
-				if (e.native) {
-					return {
-						x: e.x,
-						y: e.y
-					};
-				}
-
-				return helpers.getRelativePosition(e, chart);
-			}
 
 			/**
 			 * Helper function to traverse all of the visible elements in the chart
@@ -73056,7 +72435,7 @@
 			}
 
 			function indexMode(chart, e, options) {
-				var position = getRelativePosition(e, chart.chart);
+				var position = helpers.getRelativePosition(e, chart.chart);
 				var distanceMetric = function(pt1, pt2) {
 					return Math.abs(pt1.x - pt2.x);
 				};
@@ -73092,14 +72471,14 @@
 			 */
 
 			/**
-			 * Contains interaction related functions
 			 * @namespace Chart.Interaction
+			 * Contains interaction related functions
 			 */
 			Chart.Interaction = {
 				// Helper function for different modes
 				modes: {
 					single: function(chart, e) {
-						var position = getRelativePosition(e, chart.chart);
+						var position = helpers.getRelativePosition(e, chart.chart);
 						var elements = [];
 
 						parseVisibleItems(chart, function(element) {
@@ -73140,7 +72519,7 @@
 					 * @return {Chart.Element[]} Array of elements that are under the point. If none are found, an empty array is returned
 					 */
 					dataset: function(chart, e, options) {
-						var position = getRelativePosition(e, chart.chart);
+						var position = helpers.getRelativePosition(e, chart.chart);
 						var items = options.intersect ? getIntersectItems(chart, position) : getNearestItems(chart, position, false);
 
 						if (items.length > 0) {
@@ -73167,7 +72546,7 @@
 					 * @return {Chart.Element[]} Array of elements that are under the point. If none are found, an empty array is returned
 					 */
 					point: function(chart, e) {
-						var position = getRelativePosition(e, chart.chart);
+						var position = helpers.getRelativePosition(e, chart.chart);
 						return getIntersectItems(chart, position);
 					},
 
@@ -73180,7 +72559,7 @@
 					 * @return {Chart.Element[]} Array of elements that are under the point. If none are found, an empty array is returned
 					 */
 					nearest: function(chart, e, options) {
-						var position = getRelativePosition(e, chart.chart);
+						var position = helpers.getRelativePosition(e, chart.chart);
 						var nearestItems = getNearestItems(chart, position, options.intersect);
 
 						// We have multiple items at the same distance from the event. Now sort by smallest
@@ -73212,7 +72591,7 @@
 					 * @return {Chart.Element[]} Array of elements that are under the point. If none are found, an empty array is returned
 					 */
 					x: function(chart, e, options) {
-						var position = getRelativePosition(e, chart.chart);
+						var position = helpers.getRelativePosition(e, chart.chart);
 						var items = [];
 						var intersectsItem = false;
 
@@ -73243,7 +72622,7 @@
 					 * @return {Chart.Element[]} Array of elements that are under the point. If none are found, an empty array is returned
 					 */
 					y: function(chart, e, options) {
-						var position = getRelativePosition(e, chart.chart);
+						var position = helpers.getRelativePosition(e, chart.chart);
 						var items = [];
 						var intersectsItem = false;
 
@@ -73270,7 +72649,7 @@
 
 
 	/***/ },
-	/* 27 */
+	/* 25 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -74038,7 +73417,7 @@
 				/**
 				 * Handle an event
 				 * @private
-				 * @param {IEvent} event - The event to handle
+				 * @param e {Event} the event to handle
 				 * @returns {Boolean} true if the tooltip changed
 				 */
 				handleEvent: function(e) {
@@ -74060,10 +73439,7 @@
 					me._lastActive = me._active;
 
 					if (options.enabled || options.custom) {
-						me._eventPosition = {
-							x: e.x,
-							y: e.y
-						};
+						me._eventPosition = helpers.getRelativePosition(e, me._chart);
 
 						var model = me._model;
 						me.update(true);
@@ -74156,7 +73532,7 @@
 
 
 	/***/ },
-	/* 28 */
+	/* 26 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -74266,7 +73642,7 @@
 
 
 	/***/ },
-	/* 29 */
+	/* 27 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -74456,7 +73832,7 @@
 
 
 	/***/ },
-	/* 30 */
+	/* 28 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -74517,17 +73893,13 @@
 						padding: vm.radius + vm.borderWidth
 					};
 				},
-				draw: function(chartArea) {
+				draw: function() {
 					var vm = this._view;
-					var model = this._model;
 					var ctx = this._chart.ctx;
 					var pointStyle = vm.pointStyle;
 					var radius = vm.radius;
 					var x = vm.x;
 					var y = vm.y;
-					var color = Chart.helpers.color;
-					var errMargin = 1.01; // 1.01 is margin for Accumulated error. (Especially Edge, IE.)
-					var ratio = 0;
 
 					if (vm.skip) {
 						return;
@@ -74537,24 +73909,6 @@
 					ctx.lineWidth = helpers.getValueOrDefault(vm.borderWidth, globalOpts.elements.point.borderWidth);
 					ctx.fillStyle = vm.backgroundColor || defaultColor;
 
-					// Cliping for Points.
-					// going out from inner charArea?
-					if ((chartArea !== undefined) && ((model.x < chartArea.left) || (chartArea.right*errMargin < model.x) || (model.y < chartArea.top) || (chartArea.bottom*errMargin < model.y))) {
-						// Point fade out
-						if (model.x < chartArea.left) {
-							ratio = (x - model.x) / (chartArea.left - model.x);
-						} else if (chartArea.right*errMargin < model.x) {
-							ratio = (model.x - x) / (model.x - chartArea.right);
-						} else if (model.y < chartArea.top) {
-							ratio = (y - model.y) / (chartArea.top - model.y);
-						} else if (chartArea.bottom*errMargin < model.y) {
-							ratio = (model.y - y) / (model.y - chartArea.bottom);
-						}
-						ratio = Math.round(ratio*100) / 100;
-						ctx.strokeStyle = color(ctx.strokeStyle).alpha(ratio).rgbString();
-						ctx.fillStyle = color(ctx.fillStyle).alpha(ratio).rgbString();
-					}
-
 					Chart.canvasHelpers.drawPoint(ctx, pointStyle, radius, x, y);
 				}
 			});
@@ -74562,7 +73916,7 @@
 
 
 	/***/ },
-	/* 31 */
+	/* 29 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -74620,71 +73974,39 @@
 				draw: function() {
 					var ctx = this._chart.ctx;
 					var vm = this._view;
-					var left, right, top, bottom, signX, signY, borderSkipped;
-					var borderWidth = vm.borderWidth;
 
-					if (!vm.horizontal) {
-						// bar
-						left = vm.x - vm.width / 2;
-						right = vm.x + vm.width / 2;
-						top = vm.y;
-						bottom = vm.base;
-						signX = 1;
-						signY = bottom > top? 1: -1;
-						borderSkipped = vm.borderSkipped || 'bottom';
-					} else {
-						// horizontal bar
-						left = vm.base;
-						right = vm.x;
-						top = vm.y - vm.height / 2;
-						bottom = vm.y + vm.height / 2;
-						signX = right > left? 1: -1;
-						signY = 1;
-						borderSkipped = vm.borderSkipped || 'left';
-					}
+					var halfWidth = vm.width / 2,
+						leftX = vm.x - halfWidth,
+						rightX = vm.x + halfWidth,
+						top = vm.base - (vm.base - vm.y),
+						halfStroke = vm.borderWidth / 2;
 
 					// Canvas doesn't allow us to stroke inside the width so we can
 					// adjust the sizes to fit if we're setting a stroke on the line
-					if (borderWidth) {
-						// borderWidth shold be less than bar width and bar height.
-						var barSize = Math.min(Math.abs(left - right), Math.abs(top - bottom));
-						borderWidth = borderWidth > barSize? barSize: borderWidth;
-						var halfStroke = borderWidth / 2;
-						// Adjust borderWidth when bar top position is near vm.base(zero).
-						var borderLeft = left + (borderSkipped !== 'left'? halfStroke * signX: 0);
-						var borderRight = right + (borderSkipped !== 'right'? -halfStroke * signX: 0);
-						var borderTop = top + (borderSkipped !== 'top'? halfStroke * signY: 0);
-						var borderBottom = bottom + (borderSkipped !== 'bottom'? -halfStroke * signY: 0);
-						// not become a vertical line?
-						if (borderLeft !== borderRight) {
-							top = borderTop;
-							bottom = borderBottom;
-						}
-						// not become a horizontal line?
-						if (borderTop !== borderBottom) {
-							left = borderLeft;
-							right = borderRight;
-						}
+					if (vm.borderWidth) {
+						leftX += halfStroke;
+						rightX -= halfStroke;
+						top += halfStroke;
 					}
 
 					ctx.beginPath();
 					ctx.fillStyle = vm.backgroundColor;
 					ctx.strokeStyle = vm.borderColor;
-					ctx.lineWidth = borderWidth;
+					ctx.lineWidth = vm.borderWidth;
 
 					// Corner points, from bottom-left to bottom-right clockwise
 					// | 1 2 |
 					// | 0 3 |
 					var corners = [
-						[left, bottom],
-						[left, top],
-						[right, top],
-						[right, bottom]
+						[leftX, vm.base],
+						[leftX, top],
+						[rightX, top],
+						[rightX, vm.base]
 					];
 
 					// Find first (starting) corner with fallback to 'bottom'
 					var borders = ['bottom', 'left', 'top', 'right'];
-					var startCorner = borders.indexOf(borderSkipped, 0);
+					var startCorner = borders.indexOf(vm.borderSkipped, 0);
 					if (startCorner === -1) {
 						startCorner = 0;
 					}
@@ -74703,7 +74025,7 @@
 					}
 
 					ctx.fill();
-					if (borderWidth) {
+					if (vm.borderWidth) {
 						ctx.stroke();
 					}
 				},
@@ -74776,7 +74098,7 @@
 
 
 	/***/ },
-	/* 32 */
+	/* 30 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -74880,7 +74202,7 @@
 
 
 	/***/ },
-	/* 33 */
+	/* 31 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -74939,10 +74261,10 @@
 					var data = me.chart.data;
 					var isHorizontal = me.isHorizontal();
 
-					if (data.yLabels && !isHorizontal) {
+					if ((data.xLabels && isHorizontal) || (data.yLabels && !isHorizontal)) {
 						return me.getRightValue(data.datasets[datasetIndex].data[index]);
 					}
-					return me.ticks[index - me.minIndex];
+					return me.ticks[index];
 				},
 
 				// Used to get data value locations.  Value can either be an index or a numerical value
@@ -74958,8 +74280,9 @@
 					}
 
 					if (me.isHorizontal()) {
-						var valueWidth = me.width / offsetAmt;
-						var widthOffset = (valueWidth * (index - me.minIndex));
+						var innerWidth = me.width - (me.paddingLeft + me.paddingRight);
+						var valueWidth = innerWidth / offsetAmt;
+						var widthOffset = (valueWidth * (index - me.minIndex)) + me.paddingLeft;
 
 						if (me.options.gridLines.offsetGridLines && includeOffset || me.maxIndex === me.minIndex && includeOffset) {
 							widthOffset += (valueWidth / 2);
@@ -74967,8 +74290,9 @@
 
 						return me.left + Math.round(widthOffset);
 					}
-					var valueHeight = me.height / offsetAmt;
-					var heightOffset = (valueHeight * (index - me.minIndex));
+					var innerHeight = me.height - (me.paddingTop + me.paddingBottom);
+					var valueHeight = innerHeight / offsetAmt;
+					var heightOffset = (valueHeight * (index - me.minIndex)) + me.paddingTop;
 
 					if (me.options.gridLines.offsetGridLines && includeOffset) {
 						heightOffset += (valueHeight / 2);
@@ -74984,13 +74308,15 @@
 					var value;
 					var offsetAmt = Math.max((me.ticks.length - ((me.options.gridLines.offsetGridLines) ? 0 : 1)), 1);
 					var horz = me.isHorizontal();
-					var valueDimension = (horz ? me.width : me.height) / offsetAmt;
+					var innerDimension = horz ? me.width - (me.paddingLeft + me.paddingRight) : me.height - (me.paddingTop + me.paddingBottom);
+					var valueDimension = innerDimension / offsetAmt;
 
 					pixel -= horz ? me.left : me.top;
 
 					if (me.options.gridLines.offsetGridLines) {
 						pixel -= (valueDimension / 2);
 					}
+					pixel -= horz ? me.paddingLeft : me.paddingTop;
 
 					if (pixel <= 0) {
 						value = 0;
@@ -75011,7 +74337,7 @@
 
 
 	/***/ },
-	/* 34 */
+	/* 32 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -75044,43 +74370,21 @@
 					me.min = null;
 					me.max = null;
 
-					var hasStacks = opts.stacked;
-					if (hasStacks === undefined) {
-						helpers.each(datasets, function(dataset, datasetIndex) {
-							if (hasStacks) {
-								return;
-							}
-
-							var meta = chart.getDatasetMeta(datasetIndex);
-							if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta) &&
-								meta.stack !== undefined) {
-								hasStacks = true;
-							}
-						});
-					}
-
-					if (opts.stacked || hasStacks) {
-						var valuesPerStack = {};
+					if (opts.stacked) {
+						var valuesPerType = {};
 
 						helpers.each(datasets, function(dataset, datasetIndex) {
 							var meta = chart.getDatasetMeta(datasetIndex);
-							var key = [
-								meta.type,
-								// we have a separate stack for stack=undefined datasets when the opts.stacked is undefined
-								((opts.stacked === undefined && meta.stack === undefined) ? datasetIndex : ''),
-								meta.stack
-							].join('.');
-
-							if (valuesPerStack[key] === undefined) {
-								valuesPerStack[key] = {
+							if (valuesPerType[meta.type] === undefined) {
+								valuesPerType[meta.type] = {
 									positiveValues: [],
 									negativeValues: []
 								};
 							}
 
 							// Store these per type
-							var positiveValues = valuesPerStack[key].positiveValues;
-							var negativeValues = valuesPerStack[key].negativeValues;
+							var positiveValues = valuesPerType[meta.type].positiveValues;
+							var negativeValues = valuesPerType[meta.type].negativeValues;
 
 							if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta)) {
 								helpers.each(dataset.data, function(rawValue, index) {
@@ -75103,7 +74407,7 @@
 							}
 						});
 
-						helpers.each(valuesPerStack, function(valuesForType) {
+						helpers.each(valuesPerType, function(valuesForType) {
 							var values = valuesForType.positiveValues.concat(valuesForType.negativeValues);
 							var minVal = helpers.min(values);
 							var maxVal = helpers.max(values);
@@ -75170,25 +74474,31 @@
 					// This must be called after fit has been run so that
 					// this.left, this.top, this.right, and this.bottom have been defined
 					var me = this;
+					var paddingLeft = me.paddingLeft;
+					var paddingBottom = me.paddingBottom;
 					var start = me.start;
 
 					var rightValue = +me.getRightValue(value);
 					var pixel;
+					var innerDimension;
 					var range = me.end - start;
 
 					if (me.isHorizontal()) {
-						pixel = me.left + (me.width / range * (rightValue - start));
-						return Math.round(pixel);
+						innerDimension = me.width - (paddingLeft + me.paddingRight);
+						pixel = me.left + (innerDimension / range * (rightValue - start));
+						return Math.round(pixel + paddingLeft);
 					}
-
-					pixel = me.bottom - (me.height / range * (rightValue - start));
+					innerDimension = me.height - (me.paddingTop + paddingBottom);
+					pixel = (me.bottom - paddingBottom) - (innerDimension / range * (rightValue - start));
 					return Math.round(pixel);
 				},
 				getValueForPixel: function(pixel) {
 					var me = this;
 					var isHorizontal = me.isHorizontal();
-					var innerDimension = isHorizontal ? me.width : me.height;
-					var offset = (isHorizontal ? pixel - me.left : me.bottom - pixel) / innerDimension;
+					var paddingLeft = me.paddingLeft;
+					var paddingBottom = me.paddingBottom;
+					var innerDimension = isHorizontal ? me.width - (paddingLeft + me.paddingRight) : me.height - (me.paddingTop + paddingBottom);
+					var offset = (isHorizontal ? pixel - me.left - paddingLeft : me.bottom - paddingBottom - pixel) / innerDimension;
 					return me.start + ((me.end - me.start) * offset);
 				},
 				getPixelForTick: function(index) {
@@ -75201,7 +74511,7 @@
 
 
 	/***/ },
-	/* 35 */
+	/* 33 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -75238,40 +74548,18 @@
 					me.max = null;
 					me.minNotZero = null;
 
-					var hasStacks = opts.stacked;
-					if (hasStacks === undefined) {
-						helpers.each(datasets, function(dataset, datasetIndex) {
-							if (hasStacks) {
-								return;
-							}
-
-							var meta = chart.getDatasetMeta(datasetIndex);
-							if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta) &&
-								meta.stack !== undefined) {
-								hasStacks = true;
-							}
-						});
-					}
-
-					if (opts.stacked || hasStacks) {
-						var valuesPerStack = {};
+					if (opts.stacked) {
+						var valuesPerType = {};
 
 						helpers.each(datasets, function(dataset, datasetIndex) {
 							var meta = chart.getDatasetMeta(datasetIndex);
-							var key = [
-								meta.type,
-								// we have a separate stack for stack=undefined datasets when the opts.stacked is undefined
-								((opts.stacked === undefined && meta.stack === undefined) ? datasetIndex : ''),
-								meta.stack
-							].join('.');
-
 							if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta)) {
-								if (valuesPerStack[key] === undefined) {
-									valuesPerStack[key] = [];
+								if (valuesPerType[meta.type] === undefined) {
+									valuesPerType[meta.type] = [];
 								}
 
 								helpers.each(dataset.data, function(rawValue, index) {
-									var values = valuesPerStack[key];
+									var values = valuesPerType[meta.type];
 									var value = +me.getRightValue(rawValue);
 									if (isNaN(value) || meta.data[index].hidden) {
 										return;
@@ -75289,7 +74577,7 @@
 							}
 						});
 
-						helpers.each(valuesPerStack, function(valuesForType) {
+						helpers.each(valuesPerType, function(valuesForType) {
 							var minVal = helpers.min(valuesForType);
 							var maxVal = helpers.max(valuesForType);
 							me.min = me.min === null ? minVal : Math.min(me.min, minVal);
@@ -75390,42 +74678,46 @@
 					var start = me.start;
 					var newVal = +me.getRightValue(value);
 					var range;
+					var paddingTop = me.paddingTop;
+					var paddingBottom = me.paddingBottom;
+					var paddingLeft = me.paddingLeft;
 					var opts = me.options;
 					var tickOpts = opts.ticks;
 
 					if (me.isHorizontal()) {
 						range = helpers.log10(me.end) - helpers.log10(start); // todo: if start === 0
 						if (newVal === 0) {
-							pixel = me.left;
+							pixel = me.left + paddingLeft;
 						} else {
-							innerDimension = me.width;
+							innerDimension = me.width - (paddingLeft + me.paddingRight);
 							pixel = me.left + (innerDimension / range * (helpers.log10(newVal) - helpers.log10(start)));
+							pixel += paddingLeft;
 						}
 					} else {
 						// Bottom - top since pixels increase downward on a screen
-						innerDimension = me.height;
+						innerDimension = me.height - (paddingTop + paddingBottom);
 						if (start === 0 && !tickOpts.reverse) {
 							range = helpers.log10(me.end) - helpers.log10(me.minNotZero);
 							if (newVal === start) {
-								pixel = me.bottom;
+								pixel = me.bottom - paddingBottom;
 							} else if (newVal === me.minNotZero) {
-								pixel = me.bottom - innerDimension * 0.02;
+								pixel = me.bottom - paddingBottom - innerDimension * 0.02;
 							} else {
-								pixel = me.bottom - innerDimension * 0.02 - (innerDimension * 0.98/ range * (helpers.log10(newVal)-helpers.log10(me.minNotZero)));
+								pixel = me.bottom - paddingBottom - innerDimension * 0.02 - (innerDimension * 0.98/ range * (helpers.log10(newVal)-helpers.log10(me.minNotZero)));
 							}
 						} else if (me.end === 0 && tickOpts.reverse) {
 							range = helpers.log10(me.start) - helpers.log10(me.minNotZero);
 							if (newVal === me.end) {
-								pixel = me.top;
+								pixel = me.top + paddingTop;
 							} else if (newVal === me.minNotZero) {
-								pixel = me.top + innerDimension * 0.02;
+								pixel = me.top + paddingTop + innerDimension * 0.02;
 							} else {
-								pixel = me.top + innerDimension * 0.02 + (innerDimension * 0.98/ range * (helpers.log10(newVal)-helpers.log10(me.minNotZero)));
+								pixel = me.top + paddingTop + innerDimension * 0.02 + (innerDimension * 0.98/ range * (helpers.log10(newVal)-helpers.log10(me.minNotZero)));
 							}
 						} else {
 							range = helpers.log10(me.end) - helpers.log10(start);
-							innerDimension = me.height;
-							pixel = me.bottom - (innerDimension / range * (helpers.log10(newVal) - helpers.log10(start)));
+							innerDimension = me.height - (paddingTop + paddingBottom);
+							pixel = (me.bottom - paddingBottom) - (innerDimension / range * (helpers.log10(newVal) - helpers.log10(start)));
 						}
 					}
 					return pixel;
@@ -75436,11 +74728,11 @@
 					var value, innerDimension;
 
 					if (me.isHorizontal()) {
-						innerDimension = me.width;
-						value = me.start * Math.pow(10, (pixel - me.left) * range / innerDimension);
+						innerDimension = me.width - (me.paddingLeft + me.paddingRight);
+						value = me.start * Math.pow(10, (pixel - me.left - me.paddingLeft) * range / innerDimension);
 					} else {  // todo: if start === 0
-						innerDimension = me.height;
-						value = Math.pow(10, (me.bottom - pixel) * range / innerDimension) / me.start;
+						innerDimension = me.height - (me.paddingTop + me.paddingBottom);
+						value = Math.pow(10, (me.bottom - me.paddingBottom - pixel) * range / innerDimension) / me.start;
 					}
 					return value;
 				}
@@ -75451,7 +74743,7 @@
 
 
 	/***/ },
-	/* 36 */
+	/* 34 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -75503,266 +74795,10 @@
 				}
 			};
 
-			function getValueCount(scale) {
-				return !scale.options.lineArc ? scale.chart.data.labels.length : 0;
-			}
-
-			function getPointLabelFontOptions(scale) {
-				var pointLabelOptions = scale.options.pointLabels;
-				var fontSize = helpers.getValueOrDefault(pointLabelOptions.fontSize, globalDefaults.defaultFontSize);
-				var fontStyle = helpers.getValueOrDefault(pointLabelOptions.fontStyle, globalDefaults.defaultFontStyle);
-				var fontFamily = helpers.getValueOrDefault(pointLabelOptions.fontFamily, globalDefaults.defaultFontFamily);
-				var font = helpers.fontString(fontSize, fontStyle, fontFamily);
-
-				return {
-					size: fontSize,
-					style: fontStyle,
-					family: fontFamily,
-					font: font
-				};
-			}
-
-			function measureLabelSize(ctx, fontSize, label) {
-				if (helpers.isArray(label)) {
-					return {
-						w: helpers.longestText(ctx, ctx.font, label),
-						h: (label.length * fontSize) + ((label.length - 1) * 1.5 * fontSize)
-					};
-				}
-
-				return {
-					w: ctx.measureText(label).width,
-					h: fontSize
-				};
-			}
-
-			function determineLimits(angle, pos, size, min, max) {
-				if (angle === min || angle === max) {
-					return {
-						start: pos - (size / 2),
-						end: pos + (size / 2)
-					};
-				} else if (angle < min || angle > max) {
-					return {
-						start: pos - size - 5,
-						end: pos
-					};
-				}
-
-				return {
-					start: pos,
-					end: pos + size + 5
-				};
-			}
-
-			/**
-			 * Helper function to fit a radial linear scale with point labels
-			 */
-			function fitWithPointLabels(scale) {
-				/*
-				 * Right, this is really confusing and there is a lot of maths going on here
-				 * The gist of the problem is here: https://gist.github.com/nnnick/696cc9c55f4b0beb8fe9
-				 *
-				 * Reaction: https://dl.dropboxusercontent.com/u/34601363/toomuchscience.gif
-				 *
-				 * Solution:
-				 *
-				 * We assume the radius of the polygon is half the size of the canvas at first
-				 * at each index we check if the text overlaps.
-				 *
-				 * Where it does, we store that angle and that index.
-				 *
-				 * After finding the largest index and angle we calculate how much we need to remove
-				 * from the shape radius to move the point inwards by that x.
-				 *
-				 * We average the left and right distances to get the maximum shape radius that can fit in the box
-				 * along with labels.
-				 *
-				 * Once we have that, we can find the centre point for the chart, by taking the x text protrusion
-				 * on each side, removing that from the size, halving it and adding the left x protrusion width.
-				 *
-				 * This will mean we have a shape fitted to the canvas, as large as it can be with the labels
-				 * and position it in the most space efficient manner
-				 *
-				 * https://dl.dropboxusercontent.com/u/34601363/yeahscience.gif
-				 */
-
-				var plFont = getPointLabelFontOptions(scale);
-
-				// Get maximum radius of the polygon. Either half the height (minus the text width) or half the width.
-				// Use this to calculate the offset + change. - Make sure L/R protrusion is at least 0 to stop issues with centre points
-				var largestPossibleRadius = Math.min(scale.height / 2, scale.width / 2);
-				var furthestLimits = {
-					l: scale.width,
-					r: 0,
-					t: scale.height,
-					b: 0
-				};
-				var furthestAngles = {};
-				var i;
-				var textSize;
-				var pointPosition;
-
-				scale.ctx.font = plFont.font;
-				scale._pointLabelSizes = [];
-
-				var valueCount = getValueCount(scale);
-				for (i = 0; i < valueCount; i++) {
-					pointPosition = scale.getPointPosition(i, largestPossibleRadius);
-					textSize = measureLabelSize(scale.ctx, plFont.size, scale.pointLabels[i] || '');
-					scale._pointLabelSizes[i] = textSize;
-
-					// Add quarter circle to make degree 0 mean top of circle
-					var angleRadians = scale.getIndexAngle(i);
-					var angle = helpers.toDegrees(angleRadians) % 360;
-					var hLimits = determineLimits(angle, pointPosition.x, textSize.w, 0, 180);
-					var vLimits = determineLimits(angle, pointPosition.y, textSize.h, 90, 270);
-
-					if (hLimits.start < furthestLimits.l) {
-						furthestLimits.l = hLimits.start;
-						furthestAngles.l = angleRadians;
-					}
-
-					if (hLimits.end > furthestLimits.r) {
-						furthestLimits.r = hLimits.end;
-						furthestAngles.r = angleRadians;
-					}
-
-					if (vLimits.start < furthestLimits.t) {
-						furthestLimits.t = vLimits.start;
-						furthestAngles.t = angleRadians;
-					}
-
-					if (vLimits.end > furthestLimits.b) {
-						furthestLimits.b = vLimits.end;
-						furthestAngles.b = angleRadians;
-					}
-				}
-
-				scale.setReductions(largestPossibleRadius, furthestLimits, furthestAngles);
-			}
-
-			/**
-			 * Helper function to fit a radial linear scale with no point labels
-			 */
-			function fit(scale) {
-				var largestPossibleRadius = Math.min(scale.height / 2, scale.width / 2);
-				scale.drawingArea = Math.round(largestPossibleRadius);
-				scale.setCenterPoint(0, 0, 0, 0);
-			}
-
-			function getTextAlignForAngle(angle) {
-				if (angle === 0 || angle === 180) {
-					return 'center';
-				} else if (angle < 180) {
-					return 'left';
-				}
-
-				return 'right';
-			}
-
-			function fillText(ctx, text, position, fontSize) {
-				if (helpers.isArray(text)) {
-					var y = position.y;
-					var spacing = 1.5 * fontSize;
-
-					for (var i = 0; i < text.length; ++i) {
-						ctx.fillText(text[i], position.x, y);
-						y+= spacing;
-					}
-				} else {
-					ctx.fillText(text, position.x, position.y);
-				}
-			}
-
-			function adjustPointPositionForLabelHeight(angle, textSize, position) {
-				if (angle === 90 || angle === 270) {
-					position.y -= (textSize.h / 2);
-				} else if (angle > 270 || angle < 90) {
-					position.y -= textSize.h;
-				}
-			}
-
-			function drawPointLabels(scale) {
-				var ctx = scale.ctx;
-				var getValueOrDefault = helpers.getValueOrDefault;
-				var opts = scale.options;
-				var angleLineOpts = opts.angleLines;
-				var pointLabelOpts = opts.pointLabels;
-
-				ctx.lineWidth = angleLineOpts.lineWidth;
-				ctx.strokeStyle = angleLineOpts.color;
-
-				var outerDistance = scale.getDistanceFromCenterForValue(opts.reverse ? scale.min : scale.max);
-
-				// Point Label Font
-				var plFont = getPointLabelFontOptions(scale);
-
-				ctx.textBaseline = 'top';
-
-				for (var i = getValueCount(scale) - 1; i >= 0; i--) {
-					if (angleLineOpts.display) {
-						var outerPosition = scale.getPointPosition(i, outerDistance);
-						ctx.beginPath();
-						ctx.moveTo(scale.xCenter, scale.yCenter);
-						ctx.lineTo(outerPosition.x, outerPosition.y);
-						ctx.stroke();
-						ctx.closePath();
-					}
-					// Extra 3px out for some label spacing
-					var pointLabelPosition = scale.getPointPosition(i, outerDistance + 5);
-
-					// Keep this in loop since we may support array properties here
-					var pointLabelFontColor = getValueOrDefault(pointLabelOpts.fontColor, globalDefaults.defaultFontColor);
-					ctx.font = plFont.font;
-					ctx.fillStyle = pointLabelFontColor;
-
-					var angleRadians = scale.getIndexAngle(i);
-					var angle = helpers.toDegrees(angleRadians);
-					ctx.textAlign = getTextAlignForAngle(angle);
-					adjustPointPositionForLabelHeight(angle, scale._pointLabelSizes[i], pointLabelPosition);
-					fillText(ctx, scale.pointLabels[i] || '', pointLabelPosition, plFont.size);
-				}
-			}
-
-			function drawRadiusLine(scale, gridLineOpts, radius, index) {
-				var ctx = scale.ctx;
-				ctx.strokeStyle = helpers.getValueAtIndexOrDefault(gridLineOpts.color, index - 1);
-				ctx.lineWidth = helpers.getValueAtIndexOrDefault(gridLineOpts.lineWidth, index - 1);
-
-				if (scale.options.lineArc) {
-					// Draw circular arcs between the points
-					ctx.beginPath();
-					ctx.arc(scale.xCenter, scale.yCenter, radius, 0, Math.PI * 2);
-					ctx.closePath();
-					ctx.stroke();
-				} else {
-					// Draw straight lines connecting each index
-					var valueCount = getValueCount(scale);
-
-					if (valueCount === 0) {
-						return;
-					}
-
-					ctx.beginPath();
-					var pointPosition = scale.getPointPosition(0, radius);
-					ctx.moveTo(pointPosition.x, pointPosition.y);
-
-					for (var i = 1; i < valueCount; i++) {
-						pointPosition = scale.getPointPosition(i, radius);
-						ctx.lineTo(pointPosition.x, pointPosition.y);
-					}
-
-					ctx.closePath();
-					ctx.stroke();
-				}
-			}
-
-			function numberOrZero(param) {
-				return helpers.isNumber(param) ? param : 0;
-			}
-
 			var LinearRadialScale = Chart.LinearScaleBase.extend({
+				getValueCount: function() {
+					return this.chart.data.labels.length;
+				},
 				setDimensions: function() {
 					var me = this;
 					var opts = me.options;
@@ -75780,8 +74816,9 @@
 				determineDataLimits: function() {
 					var me = this;
 					var chart = me.chart;
-					var min = Number.POSITIVE_INFINITY;
-					var max = Number.NEGATIVE_INFINITY;
+					me.min = null;
+					me.max = null;
+
 
 					helpers.each(chart.data.datasets, function(dataset, datasetIndex) {
 						if (chart.isDatasetVisible(datasetIndex)) {
@@ -75793,14 +74830,20 @@
 									return;
 								}
 
-								min = Math.min(value, min);
-								max = Math.max(value, max);
+								if (me.min === null) {
+									me.min = value;
+								} else if (value < me.min) {
+									me.min = value;
+								}
+
+								if (me.max === null) {
+									me.max = value;
+								} else if (value > me.max) {
+									me.max = value;
+								}
 							});
 						}
 					});
-
-					me.min = (min === Number.POSITIVE_INFINITY ? 0 : min);
-					me.max = (max === Number.NEGATIVE_INFINITY ? 0 : max);
 
 					// Common base implementation to handle ticks.min, ticks.max, ticks.beginAtZero
 					me.handleTickRangeOptions();
@@ -75821,46 +74864,122 @@
 					return +this.getRightValue(this.chart.data.datasets[datasetIndex].data[index]);
 				},
 				fit: function() {
-					if (this.options.lineArc) {
-						fit(this);
-					} else {
-						fitWithPointLabels(this);
+					/*
+					 * Right, this is really confusing and there is a lot of maths going on here
+					 * The gist of the problem is here: https://gist.github.com/nnnick/696cc9c55f4b0beb8fe9
+					 *
+					 * Reaction: https://dl.dropboxusercontent.com/u/34601363/toomuchscience.gif
+					 *
+					 * Solution:
+					 *
+					 * We assume the radius of the polygon is half the size of the canvas at first
+					 * at each index we check if the text overlaps.
+					 *
+					 * Where it does, we store that angle and that index.
+					 *
+					 * After finding the largest index and angle we calculate how much we need to remove
+					 * from the shape radius to move the point inwards by that x.
+					 *
+					 * We average the left and right distances to get the maximum shape radius that can fit in the box
+					 * along with labels.
+					 *
+					 * Once we have that, we can find the centre point for the chart, by taking the x text protrusion
+					 * on each side, removing that from the size, halving it and adding the left x protrusion width.
+					 *
+					 * This will mean we have a shape fitted to the canvas, as large as it can be with the labels
+					 * and position it in the most space efficient manner
+					 *
+					 * https://dl.dropboxusercontent.com/u/34601363/yeahscience.gif
+					 */
+
+					var pointLabels = this.options.pointLabels;
+					var pointLabelFontSize = helpers.getValueOrDefault(pointLabels.fontSize, globalDefaults.defaultFontSize);
+					var pointLabeFontStyle = helpers.getValueOrDefault(pointLabels.fontStyle, globalDefaults.defaultFontStyle);
+					var pointLabeFontFamily = helpers.getValueOrDefault(pointLabels.fontFamily, globalDefaults.defaultFontFamily);
+					var pointLabeFont = helpers.fontString(pointLabelFontSize, pointLabeFontStyle, pointLabeFontFamily);
+
+					// Get maximum radius of the polygon. Either half the height (minus the text width) or half the width.
+					// Use this to calculate the offset + change. - Make sure L/R protrusion is at least 0 to stop issues with centre points
+					var largestPossibleRadius = helpers.min([(this.height / 2 - pointLabelFontSize - 5), this.width / 2]),
+						pointPosition,
+						i,
+						textWidth,
+						halfTextWidth,
+						furthestRight = this.width,
+						furthestRightIndex,
+						furthestRightAngle,
+						furthestLeft = 0,
+						furthestLeftIndex,
+						furthestLeftAngle,
+						xProtrusionLeft,
+						xProtrusionRight,
+						radiusReductionRight,
+						radiusReductionLeft;
+					this.ctx.font = pointLabeFont;
+
+					for (i = 0; i < this.getValueCount(); i++) {
+						// 5px to space the text slightly out - similar to what we do in the draw function.
+						pointPosition = this.getPointPosition(i, largestPossibleRadius);
+						textWidth = this.ctx.measureText(this.pointLabels[i] ? this.pointLabels[i] : '').width + 5;
+
+						// Add quarter circle to make degree 0 mean top of circle
+						var angleRadians = this.getIndexAngle(i) + (Math.PI / 2);
+						var angle = (angleRadians * 360 / (2 * Math.PI)) % 360;
+
+						if (angle === 0 || angle === 180) {
+							// At angle 0 and 180, we're at exactly the top/bottom
+							// of the radar chart, so text will be aligned centrally, so we'll half it and compare
+							// w/left and right text sizes
+							halfTextWidth = textWidth / 2;
+							if (pointPosition.x + halfTextWidth > furthestRight) {
+								furthestRight = pointPosition.x + halfTextWidth;
+								furthestRightIndex = i;
+							}
+							if (pointPosition.x - halfTextWidth < furthestLeft) {
+								furthestLeft = pointPosition.x - halfTextWidth;
+								furthestLeftIndex = i;
+							}
+						} else if (angle < 180) {
+							// Less than half the values means we'll left align the text
+							if (pointPosition.x + textWidth > furthestRight) {
+								furthestRight = pointPosition.x + textWidth;
+								furthestRightIndex = i;
+							}
+						// More than half the values means we'll right align the text
+						} else if (pointPosition.x - textWidth < furthestLeft) {
+							furthestLeft = pointPosition.x - textWidth;
+							furthestLeftIndex = i;
+						}
 					}
-				},
-				/**
-				 * Set radius reductions and determine new radius and center point
-				 * @private
-				 */
-				setReductions: function(largestPossibleRadius, furthestLimits, furthestAngles) {
-					var me = this;
-					var radiusReductionLeft = furthestLimits.l / Math.sin(furthestAngles.l);
-					var radiusReductionRight = Math.max(furthestLimits.r - me.width, 0) / Math.sin(furthestAngles.r);
-					var radiusReductionTop = -furthestLimits.t / Math.cos(furthestAngles.t);
-					var radiusReductionBottom = -Math.max(furthestLimits.b - me.height, 0) / Math.cos(furthestAngles.b);
 
-					radiusReductionLeft = numberOrZero(radiusReductionLeft);
-					radiusReductionRight = numberOrZero(radiusReductionRight);
-					radiusReductionTop = numberOrZero(radiusReductionTop);
-					radiusReductionBottom = numberOrZero(radiusReductionBottom);
+					xProtrusionLeft = furthestLeft;
+					xProtrusionRight = Math.ceil(furthestRight - this.width);
 
-					me.drawingArea = Math.min(
-						Math.round(largestPossibleRadius - (radiusReductionLeft + radiusReductionRight) / 2),
-						Math.round(largestPossibleRadius - (radiusReductionTop + radiusReductionBottom) / 2));
-					me.setCenterPoint(radiusReductionLeft, radiusReductionRight, radiusReductionTop, radiusReductionBottom);
+					furthestRightAngle = this.getIndexAngle(furthestRightIndex);
+					furthestLeftAngle = this.getIndexAngle(furthestLeftIndex);
+
+					radiusReductionRight = xProtrusionRight / Math.sin(furthestRightAngle + Math.PI / 2);
+					radiusReductionLeft = xProtrusionLeft / Math.sin(furthestLeftAngle + Math.PI / 2);
+
+					// Ensure we actually need to reduce the size of the chart
+					radiusReductionRight = (helpers.isNumber(radiusReductionRight)) ? radiusReductionRight : 0;
+					radiusReductionLeft = (helpers.isNumber(radiusReductionLeft)) ? radiusReductionLeft : 0;
+
+					this.drawingArea = Math.round(largestPossibleRadius - (radiusReductionLeft + radiusReductionRight) / 2);
+					this.setCenterPoint(radiusReductionLeft, radiusReductionRight);
 				},
-				setCenterPoint: function(leftMovement, rightMovement, topMovement, bottomMovement) {
+				setCenterPoint: function(leftMovement, rightMovement) {
 					var me = this;
 					var maxRight = me.width - rightMovement - me.drawingArea,
-						maxLeft = leftMovement + me.drawingArea,
-						maxTop = topMovement + me.drawingArea,
-						maxBottom = me.height - bottomMovement - me.drawingArea;
+						maxLeft = leftMovement + me.drawingArea;
 
 					me.xCenter = Math.round(((maxLeft + maxRight) / 2) + me.left);
-					me.yCenter = Math.round(((maxTop + maxBottom) / 2) + me.top);
+					// Always vertically in the centre as the text height doesn't change
+					me.yCenter = Math.round((me.height / 2) + me.top);
 				},
 
 				getIndexAngle: function(index) {
-					var angleMultiplier = (Math.PI * 2) / getValueCount(this);
+					var angleMultiplier = (Math.PI * 2) / this.getValueCount();
 					var startAngle = this.chart.options && this.chart.options.startAngle ?
 						this.chart.options.startAngle :
 						0;
@@ -75868,7 +74987,7 @@
 					var startAngleRadians = startAngle * Math.PI * 2 / 360;
 
 					// Start from the top instead of right, so remove a quarter of the circle
-					return index * angleMultiplier + startAngleRadians;
+					return index * angleMultiplier - (Math.PI / 2) + startAngleRadians;
 				},
 				getDistanceFromCenterForValue: function(value) {
 					var me = this;
@@ -75886,7 +75005,7 @@
 				},
 				getPointPosition: function(index, distanceFromCenter) {
 					var me = this;
-					var thisAngle = me.getIndexAngle(index) - (Math.PI / 2);
+					var thisAngle = me.getIndexAngle(index);
 					return {
 						x: Math.round(Math.cos(thisAngle) * distanceFromCenter) + me.xCenter,
 						y: Math.round(Math.sin(thisAngle) * distanceFromCenter) + me.yCenter
@@ -75913,6 +75032,8 @@
 					var opts = me.options;
 					var gridLineOpts = opts.gridLines;
 					var tickOpts = opts.ticks;
+					var angleLineOpts = opts.angleLines;
+					var pointLabelOpts = opts.pointLabels;
 					var getValueOrDefault = helpers.getValueOrDefault;
 
 					if (opts.display) {
@@ -75932,7 +75053,29 @@
 
 								// Draw circular lines around the scale
 								if (gridLineOpts.display && index !== 0) {
-									drawRadiusLine(me, gridLineOpts, yCenterOffset, index);
+									ctx.strokeStyle = helpers.getValueAtIndexOrDefault(gridLineOpts.color, index - 1);
+									ctx.lineWidth = helpers.getValueAtIndexOrDefault(gridLineOpts.lineWidth, index - 1);
+
+									if (opts.lineArc) {
+										// Draw circular arcs between the points
+										ctx.beginPath();
+										ctx.arc(me.xCenter, me.yCenter, yCenterOffset, 0, Math.PI * 2);
+										ctx.closePath();
+										ctx.stroke();
+									} else {
+										// Draw straight lines connecting each index
+										ctx.beginPath();
+										for (var i = 0; i < me.getValueCount(); i++) {
+											var pointPosition = me.getPointPosition(i, yCenterOffset);
+											if (i === 0) {
+												ctx.moveTo(pointPosition.x, pointPosition.y);
+											} else {
+												ctx.lineTo(pointPosition.x, pointPosition.y);
+											}
+										}
+										ctx.closePath();
+										ctx.stroke();
+									}
 								}
 
 								if (tickOpts.display) {
@@ -75959,7 +75102,59 @@
 						});
 
 						if (!opts.lineArc) {
-							drawPointLabels(me);
+							ctx.lineWidth = angleLineOpts.lineWidth;
+							ctx.strokeStyle = angleLineOpts.color;
+
+							var outerDistance = me.getDistanceFromCenterForValue(opts.reverse ? me.min : me.max);
+
+							// Point Label Font
+							var pointLabelFontSize = getValueOrDefault(pointLabelOpts.fontSize, globalDefaults.defaultFontSize);
+							var pointLabeFontStyle = getValueOrDefault(pointLabelOpts.fontStyle, globalDefaults.defaultFontStyle);
+							var pointLabeFontFamily = getValueOrDefault(pointLabelOpts.fontFamily, globalDefaults.defaultFontFamily);
+							var pointLabeFont = helpers.fontString(pointLabelFontSize, pointLabeFontStyle, pointLabeFontFamily);
+
+							for (var i = me.getValueCount() - 1; i >= 0; i--) {
+								if (angleLineOpts.display) {
+									var outerPosition = me.getPointPosition(i, outerDistance);
+									ctx.beginPath();
+									ctx.moveTo(me.xCenter, me.yCenter);
+									ctx.lineTo(outerPosition.x, outerPosition.y);
+									ctx.stroke();
+									ctx.closePath();
+								}
+								// Extra 3px out for some label spacing
+								var pointLabelPosition = me.getPointPosition(i, outerDistance + 5);
+
+								// Keep this in loop since we may support array properties here
+								var pointLabelFontColor = getValueOrDefault(pointLabelOpts.fontColor, globalDefaults.defaultFontColor);
+								ctx.font = pointLabeFont;
+								ctx.fillStyle = pointLabelFontColor;
+
+								var pointLabels = me.pointLabels;
+
+								// Add quarter circle to make degree 0 mean top of circle
+								var angleRadians = this.getIndexAngle(i) + (Math.PI / 2);
+								var angle = (angleRadians * 360 / (2 * Math.PI)) % 360;
+
+								if (angle === 0 || angle === 180) {
+									ctx.textAlign = 'center';
+								} else if (angle < 180) {
+									ctx.textAlign = 'left';
+								} else {
+									ctx.textAlign = 'right';
+								}
+
+								// Set the correct text baseline based on outer positioning
+								if (angle === 90 || angle === 270) {
+									ctx.textBaseline = 'middle';
+								} else if (angle > 270 || angle < 90) {
+									ctx.textBaseline = 'bottom';
+								} else {
+									ctx.textBaseline = 'top';
+								}
+
+								ctx.fillText(pointLabels[i] ? pointLabels[i] : '', pointLabelPosition.x, pointLabelPosition.y);
+							}
 						}
 					}
 				}
@@ -75970,13 +75165,13 @@
 
 
 	/***/ },
-	/* 37 */
+	/* 35 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		/* global window: false */
 		'use strict';
 
-		var moment = __webpack_require__(38);
+		var moment = __webpack_require__(36);
 		moment = typeof(moment) === 'function' ? moment : window.moment;
 
 		module.exports = function(Chart) {
@@ -76215,7 +75410,7 @@
 						me.unitScale = helpers.getValueOrDefault(me.options.time.unitStepSize, 1);
 					} else {
 						// Determine the smallest needed unit of the time
-						var innerWidth = me.isHorizontal() ? me.width : me.height;
+						var innerWidth = me.isHorizontal() ? me.width - (me.paddingLeft + me.paddingRight) : me.height - (me.paddingTop + me.paddingBottom);
 
 						// Crude approximation of what the label length might be
 						var tempFirstLabel = me.tickFormatFunction(me.firstTick, 0, []);
@@ -76299,7 +75494,7 @@
 					me.ticks.push(me.firstTick.clone());
 
 					// For every unit in between the first and last moment, create a moment and add it to the ticks tick
-					for (var i = me.unitScale; i <= me.scaleSizeInUnits; i += me.unitScale) {
+					for (var i = 1; i <= me.scaleSizeInUnits; ++i) {
 						var newTick = roundedStart.clone().add(i, me.tickUnit);
 
 						// Are we greater than the max time
@@ -76307,7 +75502,9 @@
 							break;
 						}
 
-						me.ticks.push(newTick);
+						if (i % me.unitScale === 0) {
+							me.ticks.push(newTick);
+						}
 					}
 
 					// Always show the right tick
@@ -76333,10 +75530,9 @@
 				getLabelForIndex: function(index, datasetIndex) {
 					var me = this;
 					var label = me.chart.data.labels && index < me.chart.data.labels.length ? me.chart.data.labels[index] : '';
-					var value = me.chart.data.datasets[datasetIndex].data[index];
 
-					if (value !== null && typeof value === 'object') {
-						label = me.getRightValue(value);
+					if (typeof me.chart.data.datasets[datasetIndex].data[0] === 'object') {
+						label = me.getRightValue(me.chart.data.datasets[datasetIndex].data[index]);
 					}
 
 					// Format nicely
@@ -76383,11 +75579,14 @@
 						var decimal = offset !== 0 ? offset / me.scaleSizeInUnits : offset;
 
 						if (me.isHorizontal()) {
-							var valueOffset = (me.width * decimal);
+							var innerWidth = me.width - (me.paddingLeft + me.paddingRight);
+							var valueOffset = (innerWidth * decimal) + me.paddingLeft;
+
 							return me.left + Math.round(valueOffset);
 						}
+						var innerHeight = me.height - (me.paddingTop + me.paddingBottom);
+						var heightOffset = (innerHeight * decimal) + me.paddingTop;
 
-						var heightOffset = (me.height * decimal);
 						return me.top + Math.round(heightOffset);
 					}
 				},
@@ -76396,8 +75595,8 @@
 				},
 				getValueForPixel: function(pixel) {
 					var me = this;
-					var innerDimension = me.isHorizontal() ? me.width : me.height;
-					var offset = (pixel - (me.isHorizontal() ? me.left : me.top)) / innerDimension;
+					var innerDimension = me.isHorizontal() ? me.width - (me.paddingLeft + me.paddingRight) : me.height - (me.paddingTop + me.paddingBottom);
+					var offset = (pixel - (me.isHorizontal() ? me.left + me.paddingLeft : me.top + me.paddingTop)) / innerDimension;
 					offset *= me.scaleSizeInUnits;
 					return me.firstTick.clone().add(moment.duration(offset, me.tickUnit).asSeconds(), 'seconds');
 				},
@@ -76432,7 +75631,7 @@
 
 
 	/***/ },
-	/* 38 */
+	/* 36 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		/* WEBPACK VAR INJECTION */(function(module) {//! moment.js
@@ -78249,7 +77448,7 @@
 		            module && module.exports) {
 		        try {
 		            oldLocale = globalLocale._abbr;
-		            __webpack_require__(40)("./" + name);
+		            __webpack_require__(38)("./" + name);
 		            // because defineLocale currently also sets the global locale, we
 		            // want to undo that for lazy loaded locales
 		            getSetGlobalLocale(oldLocale);
@@ -80737,10 +79936,10 @@
 
 		})));
 
-		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(39)(module)))
+		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(37)(module)))
 
 	/***/ },
-	/* 39 */
+	/* 37 */
 	/***/ function(module, exports) {
 
 		module.exports = function(module) {
@@ -80756,226 +79955,226 @@
 
 
 	/***/ },
-	/* 40 */
+	/* 38 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		var map = {
-			"./af": 41,
-			"./af.js": 41,
-			"./ar": 42,
-			"./ar-dz": 43,
-			"./ar-dz.js": 43,
-			"./ar-ly": 44,
-			"./ar-ly.js": 44,
-			"./ar-ma": 45,
-			"./ar-ma.js": 45,
-			"./ar-sa": 46,
-			"./ar-sa.js": 46,
-			"./ar-tn": 47,
-			"./ar-tn.js": 47,
-			"./ar.js": 42,
-			"./az": 48,
-			"./az.js": 48,
-			"./be": 49,
-			"./be.js": 49,
-			"./bg": 50,
-			"./bg.js": 50,
-			"./bn": 51,
-			"./bn.js": 51,
-			"./bo": 52,
-			"./bo.js": 52,
-			"./br": 53,
-			"./br.js": 53,
-			"./bs": 54,
-			"./bs.js": 54,
-			"./ca": 55,
-			"./ca.js": 55,
-			"./cs": 56,
-			"./cs.js": 56,
-			"./cv": 57,
-			"./cv.js": 57,
-			"./cy": 58,
-			"./cy.js": 58,
-			"./da": 59,
-			"./da.js": 59,
-			"./de": 60,
-			"./de-at": 61,
-			"./de-at.js": 61,
-			"./de.js": 60,
-			"./dv": 62,
-			"./dv.js": 62,
-			"./el": 63,
-			"./el.js": 63,
-			"./en-au": 64,
-			"./en-au.js": 64,
-			"./en-ca": 65,
-			"./en-ca.js": 65,
-			"./en-gb": 66,
-			"./en-gb.js": 66,
-			"./en-ie": 67,
-			"./en-ie.js": 67,
-			"./en-nz": 68,
-			"./en-nz.js": 68,
-			"./eo": 69,
-			"./eo.js": 69,
-			"./es": 70,
-			"./es-do": 71,
-			"./es-do.js": 71,
-			"./es.js": 70,
-			"./et": 72,
-			"./et.js": 72,
-			"./eu": 73,
-			"./eu.js": 73,
-			"./fa": 74,
-			"./fa.js": 74,
-			"./fi": 75,
-			"./fi.js": 75,
-			"./fo": 76,
-			"./fo.js": 76,
-			"./fr": 77,
-			"./fr-ca": 78,
-			"./fr-ca.js": 78,
-			"./fr-ch": 79,
-			"./fr-ch.js": 79,
-			"./fr.js": 77,
-			"./fy": 80,
-			"./fy.js": 80,
-			"./gd": 81,
-			"./gd.js": 81,
-			"./gl": 82,
-			"./gl.js": 82,
-			"./he": 83,
-			"./he.js": 83,
-			"./hi": 84,
-			"./hi.js": 84,
-			"./hr": 85,
-			"./hr.js": 85,
-			"./hu": 86,
-			"./hu.js": 86,
-			"./hy-am": 87,
-			"./hy-am.js": 87,
-			"./id": 88,
-			"./id.js": 88,
-			"./is": 89,
-			"./is.js": 89,
-			"./it": 90,
-			"./it.js": 90,
-			"./ja": 91,
-			"./ja.js": 91,
-			"./jv": 92,
-			"./jv.js": 92,
-			"./ka": 93,
-			"./ka.js": 93,
-			"./kk": 94,
-			"./kk.js": 94,
-			"./km": 95,
-			"./km.js": 95,
-			"./ko": 96,
-			"./ko.js": 96,
-			"./ky": 97,
-			"./ky.js": 97,
-			"./lb": 98,
-			"./lb.js": 98,
-			"./lo": 99,
-			"./lo.js": 99,
-			"./lt": 100,
-			"./lt.js": 100,
-			"./lv": 101,
-			"./lv.js": 101,
-			"./me": 102,
-			"./me.js": 102,
-			"./mi": 103,
-			"./mi.js": 103,
-			"./mk": 104,
-			"./mk.js": 104,
-			"./ml": 105,
-			"./ml.js": 105,
-			"./mr": 106,
-			"./mr.js": 106,
-			"./ms": 107,
-			"./ms-my": 108,
-			"./ms-my.js": 108,
-			"./ms.js": 107,
-			"./my": 109,
-			"./my.js": 109,
-			"./nb": 110,
-			"./nb.js": 110,
-			"./ne": 111,
-			"./ne.js": 111,
-			"./nl": 112,
-			"./nl-be": 113,
-			"./nl-be.js": 113,
-			"./nl.js": 112,
-			"./nn": 114,
-			"./nn.js": 114,
-			"./pa-in": 115,
-			"./pa-in.js": 115,
-			"./pl": 116,
-			"./pl.js": 116,
-			"./pt": 117,
-			"./pt-br": 118,
-			"./pt-br.js": 118,
-			"./pt.js": 117,
-			"./ro": 119,
-			"./ro.js": 119,
-			"./ru": 120,
-			"./ru.js": 120,
-			"./se": 121,
-			"./se.js": 121,
-			"./si": 122,
-			"./si.js": 122,
-			"./sk": 123,
-			"./sk.js": 123,
-			"./sl": 124,
-			"./sl.js": 124,
-			"./sq": 125,
-			"./sq.js": 125,
-			"./sr": 126,
-			"./sr-cyrl": 127,
-			"./sr-cyrl.js": 127,
-			"./sr.js": 126,
-			"./ss": 128,
-			"./ss.js": 128,
-			"./sv": 129,
-			"./sv.js": 129,
-			"./sw": 130,
-			"./sw.js": 130,
-			"./ta": 131,
-			"./ta.js": 131,
-			"./te": 132,
-			"./te.js": 132,
-			"./tet": 133,
-			"./tet.js": 133,
-			"./th": 134,
-			"./th.js": 134,
-			"./tl-ph": 135,
-			"./tl-ph.js": 135,
-			"./tlh": 136,
-			"./tlh.js": 136,
-			"./tr": 137,
-			"./tr.js": 137,
-			"./tzl": 138,
-			"./tzl.js": 138,
-			"./tzm": 139,
-			"./tzm-latn": 140,
-			"./tzm-latn.js": 140,
-			"./tzm.js": 139,
-			"./uk": 141,
-			"./uk.js": 141,
-			"./uz": 142,
-			"./uz.js": 142,
-			"./vi": 143,
-			"./vi.js": 143,
-			"./x-pseudo": 144,
-			"./x-pseudo.js": 144,
-			"./yo": 145,
-			"./yo.js": 145,
-			"./zh-cn": 146,
-			"./zh-cn.js": 146,
-			"./zh-hk": 147,
-			"./zh-hk.js": 147,
-			"./zh-tw": 148,
-			"./zh-tw.js": 148
+			"./af": 39,
+			"./af.js": 39,
+			"./ar": 40,
+			"./ar-dz": 41,
+			"./ar-dz.js": 41,
+			"./ar-ly": 42,
+			"./ar-ly.js": 42,
+			"./ar-ma": 43,
+			"./ar-ma.js": 43,
+			"./ar-sa": 44,
+			"./ar-sa.js": 44,
+			"./ar-tn": 45,
+			"./ar-tn.js": 45,
+			"./ar.js": 40,
+			"./az": 46,
+			"./az.js": 46,
+			"./be": 47,
+			"./be.js": 47,
+			"./bg": 48,
+			"./bg.js": 48,
+			"./bn": 49,
+			"./bn.js": 49,
+			"./bo": 50,
+			"./bo.js": 50,
+			"./br": 51,
+			"./br.js": 51,
+			"./bs": 52,
+			"./bs.js": 52,
+			"./ca": 53,
+			"./ca.js": 53,
+			"./cs": 54,
+			"./cs.js": 54,
+			"./cv": 55,
+			"./cv.js": 55,
+			"./cy": 56,
+			"./cy.js": 56,
+			"./da": 57,
+			"./da.js": 57,
+			"./de": 58,
+			"./de-at": 59,
+			"./de-at.js": 59,
+			"./de.js": 58,
+			"./dv": 60,
+			"./dv.js": 60,
+			"./el": 61,
+			"./el.js": 61,
+			"./en-au": 62,
+			"./en-au.js": 62,
+			"./en-ca": 63,
+			"./en-ca.js": 63,
+			"./en-gb": 64,
+			"./en-gb.js": 64,
+			"./en-ie": 65,
+			"./en-ie.js": 65,
+			"./en-nz": 66,
+			"./en-nz.js": 66,
+			"./eo": 67,
+			"./eo.js": 67,
+			"./es": 68,
+			"./es-do": 69,
+			"./es-do.js": 69,
+			"./es.js": 68,
+			"./et": 70,
+			"./et.js": 70,
+			"./eu": 71,
+			"./eu.js": 71,
+			"./fa": 72,
+			"./fa.js": 72,
+			"./fi": 73,
+			"./fi.js": 73,
+			"./fo": 74,
+			"./fo.js": 74,
+			"./fr": 75,
+			"./fr-ca": 76,
+			"./fr-ca.js": 76,
+			"./fr-ch": 77,
+			"./fr-ch.js": 77,
+			"./fr.js": 75,
+			"./fy": 78,
+			"./fy.js": 78,
+			"./gd": 79,
+			"./gd.js": 79,
+			"./gl": 80,
+			"./gl.js": 80,
+			"./he": 81,
+			"./he.js": 81,
+			"./hi": 82,
+			"./hi.js": 82,
+			"./hr": 83,
+			"./hr.js": 83,
+			"./hu": 84,
+			"./hu.js": 84,
+			"./hy-am": 85,
+			"./hy-am.js": 85,
+			"./id": 86,
+			"./id.js": 86,
+			"./is": 87,
+			"./is.js": 87,
+			"./it": 88,
+			"./it.js": 88,
+			"./ja": 89,
+			"./ja.js": 89,
+			"./jv": 90,
+			"./jv.js": 90,
+			"./ka": 91,
+			"./ka.js": 91,
+			"./kk": 92,
+			"./kk.js": 92,
+			"./km": 93,
+			"./km.js": 93,
+			"./ko": 94,
+			"./ko.js": 94,
+			"./ky": 95,
+			"./ky.js": 95,
+			"./lb": 96,
+			"./lb.js": 96,
+			"./lo": 97,
+			"./lo.js": 97,
+			"./lt": 98,
+			"./lt.js": 98,
+			"./lv": 99,
+			"./lv.js": 99,
+			"./me": 100,
+			"./me.js": 100,
+			"./mi": 101,
+			"./mi.js": 101,
+			"./mk": 102,
+			"./mk.js": 102,
+			"./ml": 103,
+			"./ml.js": 103,
+			"./mr": 104,
+			"./mr.js": 104,
+			"./ms": 105,
+			"./ms-my": 106,
+			"./ms-my.js": 106,
+			"./ms.js": 105,
+			"./my": 107,
+			"./my.js": 107,
+			"./nb": 108,
+			"./nb.js": 108,
+			"./ne": 109,
+			"./ne.js": 109,
+			"./nl": 110,
+			"./nl-be": 111,
+			"./nl-be.js": 111,
+			"./nl.js": 110,
+			"./nn": 112,
+			"./nn.js": 112,
+			"./pa-in": 113,
+			"./pa-in.js": 113,
+			"./pl": 114,
+			"./pl.js": 114,
+			"./pt": 115,
+			"./pt-br": 116,
+			"./pt-br.js": 116,
+			"./pt.js": 115,
+			"./ro": 117,
+			"./ro.js": 117,
+			"./ru": 118,
+			"./ru.js": 118,
+			"./se": 119,
+			"./se.js": 119,
+			"./si": 120,
+			"./si.js": 120,
+			"./sk": 121,
+			"./sk.js": 121,
+			"./sl": 122,
+			"./sl.js": 122,
+			"./sq": 123,
+			"./sq.js": 123,
+			"./sr": 124,
+			"./sr-cyrl": 125,
+			"./sr-cyrl.js": 125,
+			"./sr.js": 124,
+			"./ss": 126,
+			"./ss.js": 126,
+			"./sv": 127,
+			"./sv.js": 127,
+			"./sw": 128,
+			"./sw.js": 128,
+			"./ta": 129,
+			"./ta.js": 129,
+			"./te": 130,
+			"./te.js": 130,
+			"./tet": 131,
+			"./tet.js": 131,
+			"./th": 132,
+			"./th.js": 132,
+			"./tl-ph": 133,
+			"./tl-ph.js": 133,
+			"./tlh": 134,
+			"./tlh.js": 134,
+			"./tr": 135,
+			"./tr.js": 135,
+			"./tzl": 136,
+			"./tzl.js": 136,
+			"./tzm": 137,
+			"./tzm-latn": 138,
+			"./tzm-latn.js": 138,
+			"./tzm.js": 137,
+			"./uk": 139,
+			"./uk.js": 139,
+			"./uz": 140,
+			"./uz.js": 140,
+			"./vi": 141,
+			"./vi.js": 141,
+			"./x-pseudo": 142,
+			"./x-pseudo.js": 142,
+			"./yo": 143,
+			"./yo.js": 143,
+			"./zh-cn": 144,
+			"./zh-cn.js": 144,
+			"./zh-hk": 145,
+			"./zh-hk.js": 145,
+			"./zh-tw": 146,
+			"./zh-tw.js": 146
 		};
 		function webpackContext(req) {
 			return __webpack_require__(webpackContextResolve(req));
@@ -80988,11 +80187,11 @@
 		};
 		webpackContext.resolve = webpackContextResolve;
 		module.exports = webpackContext;
-		webpackContext.id = 40;
+		webpackContext.id = 38;
 
 
 	/***/ },
-	/* 41 */
+	/* 39 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81000,7 +80199,7 @@
 		//! author : Werner Mollentze : https://github.com/wernerm
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81070,7 +80269,7 @@
 
 
 	/***/ },
-	/* 42 */
+	/* 40 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81080,7 +80279,7 @@
 		//! author : forabi https://github.com/forabi
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81217,7 +80416,7 @@
 
 
 	/***/ },
-	/* 43 */
+	/* 41 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81225,7 +80424,7 @@
 		//! author : Noureddine LOUAHEDJ : https://github.com/noureddineme
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81281,7 +80480,7 @@
 
 
 	/***/ },
-	/* 44 */
+	/* 42 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81289,7 +80488,7 @@
 		//! author : Ali Hmer: https://github.com/kikoanis
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81412,7 +80611,7 @@
 
 
 	/***/ },
-	/* 45 */
+	/* 43 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81421,7 +80620,7 @@
 		//! author : Abdel Said : https://github.com/abdelsaid
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81477,7 +80676,7 @@
 
 
 	/***/ },
-	/* 46 */
+	/* 44 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81485,7 +80684,7 @@
 		//! author : Suhail Alkowaileet : https://github.com/xsoh
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81587,7 +80786,7 @@
 
 
 	/***/ },
-	/* 47 */
+	/* 45 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81595,7 +80794,7 @@
 		//! author : Nader Toukabri : https://github.com/naderio
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81651,7 +80850,7 @@
 
 
 	/***/ },
-	/* 48 */
+	/* 46 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81659,7 +80858,7 @@
 		//! author : topchiyev : https://github.com/topchiyev
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81761,7 +80960,7 @@
 
 
 	/***/ },
-	/* 49 */
+	/* 47 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81771,7 +80970,7 @@
 		//! Author : Menelion Elensúle : https://github.com/Oire
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81900,7 +81099,7 @@
 
 
 	/***/ },
-	/* 50 */
+	/* 48 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -81908,7 +81107,7 @@
 		//! author : Krasen Borisov : https://github.com/kraz
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -81995,7 +81194,7 @@
 
 
 	/***/ },
-	/* 51 */
+	/* 49 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82003,7 +81202,7 @@
 		//! author : Kaushik Gandhi : https://github.com/kaushikgandhi
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82119,7 +81318,7 @@
 
 
 	/***/ },
-	/* 52 */
+	/* 50 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82127,7 +81326,7 @@
 		//! author : Thupten N. Chakrishar : https://github.com/vajradog
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82243,7 +81442,7 @@
 
 
 	/***/ },
-	/* 53 */
+	/* 51 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82251,7 +81450,7 @@
 		//! author : Jean-Baptiste Le Duigou : https://github.com/jbleduigou
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82356,7 +81555,7 @@
 
 
 	/***/ },
-	/* 54 */
+	/* 52 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82365,7 +81564,7 @@
 		//! based on (hr) translation by Bojan Marković
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82504,7 +81703,7 @@
 
 
 	/***/ },
-	/* 55 */
+	/* 53 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82512,7 +81711,7 @@
 		//! author : Juan G. Hurtado : https://github.com/juanghurtado
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82590,7 +81789,7 @@
 
 
 	/***/ },
-	/* 56 */
+	/* 54 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82598,7 +81797,7 @@
 		//! author : petrbela : https://github.com/petrbela
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82767,7 +81966,7 @@
 
 
 	/***/ },
-	/* 57 */
+	/* 55 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82775,7 +81974,7 @@
 		//! author : Anatoly Mironov : https://github.com/mirontoli
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82835,7 +82034,7 @@
 
 
 	/***/ },
-	/* 58 */
+	/* 56 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82844,7 +82043,7 @@
 		//! author : https://github.com/ryangreaves
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82921,7 +82120,7 @@
 
 
 	/***/ },
-	/* 59 */
+	/* 57 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82929,7 +82128,7 @@
 		//! author : Ulrik Nielsen : https://github.com/mrbase
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -82986,7 +82185,7 @@
 
 
 	/***/ },
-	/* 60 */
+	/* 58 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -82996,7 +82195,7 @@
 		//! author : Mikolaj Dadela : https://github.com/mik01aj
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83069,7 +82268,7 @@
 
 
 	/***/ },
-	/* 61 */
+	/* 59 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83080,7 +82279,7 @@
 		//! author : Mikolaj Dadela : https://github.com/mik01aj
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83153,7 +82352,7 @@
 
 
 	/***/ },
-	/* 62 */
+	/* 60 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83161,7 +82360,7 @@
 		//! author : Jawish Hameed : https://github.com/jawish
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83258,7 +82457,7 @@
 
 
 	/***/ },
-	/* 63 */
+	/* 61 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83266,7 +82465,7 @@
 		//! author : Aggelos Karalias : https://github.com/mehiel
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83361,7 +82560,7 @@
 
 
 	/***/ },
-	/* 64 */
+	/* 62 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83369,7 +82568,7 @@
 		//! author : Jared Morse : https://github.com/jarcoal
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83433,7 +82632,7 @@
 
 
 	/***/ },
-	/* 65 */
+	/* 63 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83441,7 +82640,7 @@
 		//! author : Jonathan Abourbih : https://github.com/jonbca
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83501,7 +82700,7 @@
 
 
 	/***/ },
-	/* 66 */
+	/* 64 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83509,7 +82708,7 @@
 		//! author : Chris Gedrim : https://github.com/chrisgedrim
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83573,7 +82772,7 @@
 
 
 	/***/ },
-	/* 67 */
+	/* 65 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83581,7 +82780,7 @@
 		//! author : Chris Cartlidge : https://github.com/chriscartlidge
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83645,7 +82844,7 @@
 
 
 	/***/ },
-	/* 68 */
+	/* 66 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83653,7 +82852,7 @@
 		//! author : Luke McGregor : https://github.com/lukemcgregor
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83717,7 +82916,7 @@
 
 
 	/***/ },
-	/* 69 */
+	/* 67 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83727,7 +82926,7 @@
 		//!          Se ne, bonvolu korekti kaj avizi min por ke mi povas lerni!
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83795,7 +82994,7 @@
 
 
 	/***/ },
-	/* 70 */
+	/* 68 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83803,7 +83002,7 @@
 		//! author : Julio Napurí : https://github.com/julionc
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83881,14 +83080,14 @@
 
 
 	/***/ },
-	/* 71 */
+	/* 69 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
 		//! locale : Spanish (Dominican Republic) [es-do]
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -83966,7 +83165,7 @@
 
 
 	/***/ },
-	/* 72 */
+	/* 70 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -83975,7 +83174,7 @@
 		//! improvements : Illimar Tambek : https://github.com/ragulka
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84051,7 +83250,7 @@
 
 
 	/***/ },
-	/* 73 */
+	/* 71 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84059,7 +83258,7 @@
 		//! author : Eneko Illarramendi : https://github.com/eillarra
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84122,7 +83321,7 @@
 
 
 	/***/ },
-	/* 74 */
+	/* 72 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84130,7 +83329,7 @@
 		//! author : Ebrahim Byagowi : https://github.com/ebraminio
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84234,7 +83433,7 @@
 
 
 	/***/ },
-	/* 75 */
+	/* 73 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84242,7 +83441,7 @@
 		//! author : Tarmo Aidantausta : https://github.com/bleadof
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84346,7 +83545,7 @@
 
 
 	/***/ },
-	/* 76 */
+	/* 74 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84354,7 +83553,7 @@
 		//! author : Ragnar Johannesen : https://github.com/ragnar123
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84411,7 +83610,7 @@
 
 
 	/***/ },
-	/* 77 */
+	/* 75 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84419,7 +83618,7 @@
 		//! author : John Fischer : https://github.com/jfroffice
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84480,7 +83679,7 @@
 
 
 	/***/ },
-	/* 78 */
+	/* 76 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84488,7 +83687,7 @@
 		//! author : Jonathan Abourbih : https://github.com/jonbca
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84545,7 +83744,7 @@
 
 
 	/***/ },
-	/* 79 */
+	/* 77 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84553,7 +83752,7 @@
 		//! author : Gaspard Bucher : https://github.com/gaspard
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84614,7 +83813,7 @@
 
 
 	/***/ },
-	/* 80 */
+	/* 78 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84622,7 +83821,7 @@
 		//! author : Robin van der Vliet : https://github.com/robin0van0der0v
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84692,7 +83891,7 @@
 
 
 	/***/ },
-	/* 81 */
+	/* 79 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84700,7 +83899,7 @@
 		//! author : Jon Ashdown : https://github.com/jonashdown
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84773,7 +83972,7 @@
 
 
 	/***/ },
-	/* 82 */
+	/* 80 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84781,7 +83980,7 @@
 		//! author : Juan G. Hurtado : https://github.com/juanghurtado
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84855,7 +84054,7 @@
 
 
 	/***/ },
-	/* 83 */
+	/* 81 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84865,7 +84064,7 @@
 		//! author : Tal Ater : https://github.com/TalAter
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -84959,7 +84158,7 @@
 
 
 	/***/ },
-	/* 84 */
+	/* 82 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -84967,7 +84166,7 @@
 		//! author : Mayank Singhal : https://github.com/mayanksinghal
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85088,7 +84287,7 @@
 
 
 	/***/ },
-	/* 85 */
+	/* 83 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85096,7 +84295,7 @@
 		//! author : Bojan Marković : https://github.com/bmarkovic
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85238,7 +84437,7 @@
 
 
 	/***/ },
-	/* 86 */
+	/* 84 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85246,7 +84445,7 @@
 		//! author : Adam Brunner : https://github.com/adambrunner
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85352,7 +84551,7 @@
 
 
 	/***/ },
-	/* 87 */
+	/* 85 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85360,7 +84559,7 @@
 		//! author : Armendarabyan : https://github.com/armendarabyan
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85452,7 +84651,7 @@
 
 
 	/***/ },
-	/* 88 */
+	/* 86 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85461,7 +84660,7 @@
 		//! reference: http://id.wikisource.org/wiki/Pedoman_Umum_Ejaan_Bahasa_Indonesia_yang_Disempurnakan
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85540,7 +84739,7 @@
 
 
 	/***/ },
-	/* 89 */
+	/* 87 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85548,7 +84747,7 @@
 		//! author : Hinrik Örn Sigurðsson : https://github.com/hinrik
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85672,7 +84871,7 @@
 
 
 	/***/ },
-	/* 90 */
+	/* 88 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85681,7 +84880,7 @@
 		//! author: Mattia Larentis: https://github.com/nostalgiaz
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85747,7 +84946,7 @@
 
 
 	/***/ },
-	/* 91 */
+	/* 89 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85755,7 +84954,7 @@
 		//! author : LI Long : https://github.com/baryon
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85828,7 +85027,7 @@
 
 
 	/***/ },
-	/* 92 */
+	/* 90 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85837,7 +85036,7 @@
 		//! reference: http://jv.wikipedia.org/wiki/Basa_Jawa
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -85916,7 +85115,7 @@
 
 
 	/***/ },
-	/* 93 */
+	/* 91 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -85924,7 +85123,7 @@
 		//! author : Irakli Janiashvili : https://github.com/irakli-janiashvili
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86010,7 +85209,7 @@
 
 
 	/***/ },
-	/* 94 */
+	/* 92 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86018,7 +85217,7 @@
 		//! authors : Nurlan Rakhimzhanov : https://github.com/nurlan
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86102,7 +85301,7 @@
 
 
 	/***/ },
-	/* 95 */
+	/* 93 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86110,7 +85309,7 @@
 		//! author : Kruy Vanna : https://github.com/kruyvanna
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86165,7 +85364,7 @@
 
 
 	/***/ },
-	/* 96 */
+	/* 94 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86174,7 +85373,7 @@
 		//! author : Jeeeyul Lee <jeeeyul@gmail.com>
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86235,7 +85434,7 @@
 
 
 	/***/ },
-	/* 97 */
+	/* 95 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86243,7 +85442,7 @@
 		//! author : Chyngyz Arystan uulu : https://github.com/chyngyz
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86328,7 +85527,7 @@
 
 
 	/***/ },
-	/* 98 */
+	/* 96 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86337,7 +85536,7 @@
 		//! author : David Raison : https://github.com/kwisatz
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86470,7 +85669,7 @@
 
 
 	/***/ },
-	/* 99 */
+	/* 97 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86478,7 +85677,7 @@
 		//! author : Ryan Hart : https://github.com/ryanhart2
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86545,7 +85744,7 @@
 
 
 	/***/ },
-	/* 100 */
+	/* 98 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86553,7 +85752,7 @@
 		//! author : Mindaugas Mozūras : https://github.com/mmozuras
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86667,7 +85866,7 @@
 
 
 	/***/ },
-	/* 101 */
+	/* 99 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86676,7 +85875,7 @@
 		//! author : Jānis Elmeris : https://github.com/JanisE
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86769,7 +85968,7 @@
 
 
 	/***/ },
-	/* 102 */
+	/* 100 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86777,7 +85976,7 @@
 		//! author : Miodrag Nikač <miodrag@restartit.me> : https://github.com/miodragnikac
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86885,7 +86084,7 @@
 
 
 	/***/ },
-	/* 103 */
+	/* 101 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86893,7 +86092,7 @@
 		//! author : John Corrigan <robbiecloset@gmail.com> : https://github.com/johnideal
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -86954,7 +86153,7 @@
 
 
 	/***/ },
-	/* 104 */
+	/* 102 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -86962,7 +86161,7 @@
 		//! author : Borislav Mickov : https://github.com/B0k0
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87049,7 +86248,7 @@
 
 
 	/***/ },
-	/* 105 */
+	/* 103 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87057,7 +86256,7 @@
 		//! author : Floyd Pink : https://github.com/floydpink
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87135,7 +86334,7 @@
 
 
 	/***/ },
-	/* 106 */
+	/* 104 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87144,7 +86343,7 @@
 		//! author : Vivek Athalye : https://github.com/vnathalye
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87299,7 +86498,7 @@
 
 
 	/***/ },
-	/* 107 */
+	/* 105 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87307,7 +86506,7 @@
 		//! author : Weldan Jamili : https://github.com/weldan
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87386,7 +86585,7 @@
 
 
 	/***/ },
-	/* 108 */
+	/* 106 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87395,7 +86594,7 @@
 		//! author : Weldan Jamili : https://github.com/weldan
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87474,7 +86673,7 @@
 
 
 	/***/ },
-	/* 109 */
+	/* 107 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87484,7 +86683,7 @@
 		//! author : Tin Aung Lin : https://github.com/thanyawzinmin
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87575,7 +86774,7 @@
 
 
 	/***/ },
-	/* 110 */
+	/* 108 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87584,7 +86783,7 @@
 		//!           Sigurd Gartmann : https://github.com/sigurdga
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87643,7 +86842,7 @@
 
 
 	/***/ },
-	/* 111 */
+	/* 109 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87651,7 +86850,7 @@
 		//! author : suvash : https://github.com/suvash
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87771,7 +86970,7 @@
 
 
 	/***/ },
-	/* 112 */
+	/* 110 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87780,7 +86979,7 @@
 		//! author : Jacob Middag : https://github.com/middagj
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87862,7 +87061,7 @@
 
 
 	/***/ },
-	/* 113 */
+	/* 111 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87871,7 +87070,7 @@
 		//! author : Jacob Middag : https://github.com/middagj
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -87953,7 +87152,7 @@
 
 
 	/***/ },
-	/* 114 */
+	/* 112 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -87961,7 +87160,7 @@
 		//! author : https://github.com/mechuwind
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88018,7 +87217,7 @@
 
 
 	/***/ },
-	/* 115 */
+	/* 113 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88026,7 +87225,7 @@
 		//! author : Harpreet Singh : https://github.com/harpreetkhalsagtbit
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88147,7 +87346,7 @@
 
 
 	/***/ },
-	/* 116 */
+	/* 114 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88155,7 +87354,7 @@
 		//! author : Rafal Hirsz : https://github.com/evoL
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88257,7 +87456,7 @@
 
 
 	/***/ },
-	/* 117 */
+	/* 115 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88265,7 +87464,7 @@
 		//! author : Jefferson : https://github.com/jalex79
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88327,7 +87526,7 @@
 
 
 	/***/ },
-	/* 118 */
+	/* 116 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88335,7 +87534,7 @@
 		//! author : Caio Ribeiro Pereira : https://github.com/caio-ribeiro-pereira
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88393,7 +87592,7 @@
 
 
 	/***/ },
-	/* 119 */
+	/* 117 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88402,7 +87601,7 @@
 		//! author : Valentin Agachi : https://github.com/avaly
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88473,7 +87672,7 @@
 
 
 	/***/ },
-	/* 120 */
+	/* 118 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88483,7 +87682,7 @@
 		//! author : Коренберг Марк : https://github.com/socketpair
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88661,7 +87860,7 @@
 
 
 	/***/ },
-	/* 121 */
+	/* 119 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88669,7 +87868,7 @@
 		//! authors : Bård Rolstad Henriksen : https://github.com/karamell
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88727,7 +87926,7 @@
 
 
 	/***/ },
-	/* 122 */
+	/* 120 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88735,7 +87934,7 @@
 		//! author : Sampath Sitinamaluwa : https://github.com/sampathsris
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88803,7 +88002,7 @@
 
 
 	/***/ },
-	/* 123 */
+	/* 121 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88812,7 +88011,7 @@
 		//! based on work of petrbela : https://github.com/petrbela
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -88958,7 +88157,7 @@
 
 
 	/***/ },
-	/* 124 */
+	/* 122 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -88966,7 +88165,7 @@
 		//! author : Robert Sedovšek : https://github.com/sedovsek
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89125,7 +88324,7 @@
 
 
 	/***/ },
-	/* 125 */
+	/* 123 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89135,7 +88334,7 @@
 		//! author : Oerd Cukalla : https://github.com/oerd
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89200,7 +88399,7 @@
 
 
 	/***/ },
-	/* 126 */
+	/* 124 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89208,7 +88407,7 @@
 		//! author : Milan Janačković<milanjanackovic@gmail.com> : https://github.com/milan-j
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89315,7 +88514,7 @@
 
 
 	/***/ },
-	/* 127 */
+	/* 125 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89323,7 +88522,7 @@
 		//! author : Milan Janačković<milanjanackovic@gmail.com> : https://github.com/milan-j
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89430,7 +88629,7 @@
 
 
 	/***/ },
-	/* 128 */
+	/* 126 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89438,7 +88637,7 @@
 		//! author : Nicolai Davies<mail@nicolai.io> : https://github.com/nicolaidavies
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89524,7 +88723,7 @@
 
 
 	/***/ },
-	/* 129 */
+	/* 127 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89532,7 +88731,7 @@
 		//! author : Jens Alm : https://github.com/ulmus
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89598,7 +88797,7 @@
 
 
 	/***/ },
-	/* 130 */
+	/* 128 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89606,7 +88805,7 @@
 		//! author : Fahad Kassim : https://github.com/fadsel
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89662,7 +88861,7 @@
 
 
 	/***/ },
-	/* 131 */
+	/* 129 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89670,7 +88869,7 @@
 		//! author : Arjunkumar Krishnamoorthy : https://github.com/tk120404
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89797,7 +88996,7 @@
 
 
 	/***/ },
-	/* 132 */
+	/* 130 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89805,7 +89004,7 @@
 		//! author : Krishna Chaitanya Thota : https://github.com/kcthota
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89891,7 +89090,7 @@
 
 
 	/***/ },
-	/* 133 */
+	/* 131 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89900,7 +89099,7 @@
 		//! author : Onorio De J. Afonso : https://github.com/marobo
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -89964,7 +89163,7 @@
 
 
 	/***/ },
-	/* 134 */
+	/* 132 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -89972,7 +89171,7 @@
 		//! author : Kridsada Thanabulpong : https://github.com/sirn
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90036,7 +89235,7 @@
 
 
 	/***/ },
-	/* 135 */
+	/* 133 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90044,7 +89243,7 @@
 		//! author : Dan Hagman : https://github.com/hagmandan
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90103,7 +89302,7 @@
 
 
 	/***/ },
-	/* 136 */
+	/* 134 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90111,7 +89310,7 @@
 		//! author : Dominika Kruk : https://github.com/amaranthrose
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90228,7 +89427,7 @@
 
 
 	/***/ },
-	/* 137 */
+	/* 135 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90237,7 +89436,7 @@
 		//!           Burak Yiğit Kaya: https://github.com/BYK
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90323,7 +89522,7 @@
 
 
 	/***/ },
-	/* 138 */
+	/* 136 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90332,7 +89531,7 @@
 		//! author : Iustì Canun
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90419,7 +89618,7 @@
 
 
 	/***/ },
-	/* 139 */
+	/* 137 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90427,7 +89626,7 @@
 		//! author : Abdel Said : https://github.com/abdelsaid
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90482,7 +89681,7 @@
 
 
 	/***/ },
-	/* 140 */
+	/* 138 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90490,7 +89689,7 @@
 		//! author : Abdel Said : https://github.com/abdelsaid
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90545,7 +89744,7 @@
 
 
 	/***/ },
-	/* 141 */
+	/* 139 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90554,7 +89753,7 @@
 		//! Author : Menelion Elensúle : https://github.com/Oire
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90696,7 +89895,7 @@
 
 
 	/***/ },
-	/* 142 */
+	/* 140 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90704,7 +89903,7 @@
 		//! author : Sardor Muminov : https://github.com/muminoff
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90759,7 +89958,7 @@
 
 
 	/***/ },
-	/* 143 */
+	/* 141 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90767,7 +89966,7 @@
 		//! author : Bang Nguyen : https://github.com/bangnk
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90843,7 +90042,7 @@
 
 
 	/***/ },
-	/* 144 */
+	/* 142 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90851,7 +90050,7 @@
 		//! author : Andrew Hood : https://github.com/andrewhood125
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90916,7 +90115,7 @@
 
 
 	/***/ },
-	/* 145 */
+	/* 143 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90924,7 +90123,7 @@
 		//! author : Atolagbe Abisoye : https://github.com/andela-batolagbe
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -90981,7 +90180,7 @@
 
 
 	/***/ },
-	/* 146 */
+	/* 144 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -90990,7 +90189,7 @@
 		//! author : Zeno Zeng : https://github.com/zenozeng
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -91113,7 +90312,7 @@
 
 
 	/***/ },
-	/* 147 */
+	/* 145 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -91123,7 +90322,7 @@
 		//! author : Konstantin : https://github.com/skfd
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -91223,7 +90422,7 @@
 
 
 	/***/ },
-	/* 148 */
+	/* 146 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		//! moment.js locale configuration
@@ -91232,7 +90431,7 @@
 		//! author : Chris Lam : https://github.com/hehachris
 
 		;(function (global, factory) {
-		    true ? factory(__webpack_require__(38)) :
+		    true ? factory(__webpack_require__(36)) :
 		   typeof define === 'function' && define.amd ? define(['../moment'], factory) :
 		   factory(global.moment)
 		}(this, (function (moment) { 'use strict';
@@ -91332,7 +90531,7 @@
 
 
 	/***/ },
-	/* 149 */
+	/* 147 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -91372,33 +90571,21 @@
 				initialize: function(chart, datasetIndex) {
 					Chart.DatasetController.prototype.initialize.call(this, chart, datasetIndex);
 
-					var me = this;
-					var meta = me.getMeta();
-					var dataset = me.getDataset();
-
-					meta.stack = dataset.stack;
 					// Use this to indicate that this is a bar dataset.
-					meta.bar = true;
+					this.getMeta().bar = true;
 				},
 
-				// Correctly calculate the bar width accounting for stacks and the fact that not all bars are visible
-				getStackCount: function() {
+				// Get the number of datasets that display bars. We use this to correctly calculate the bar width
+				getBarCount: function() {
 					var me = this;
-					var meta = me.getMeta();
-					var yScale = me.getScaleForId(meta.yAxisID);
-
-					var stacks = [];
+					var barCount = 0;
 					helpers.each(me.chart.data.datasets, function(dataset, datasetIndex) {
-						var dsMeta = me.chart.getDatasetMeta(datasetIndex);
-						if (dsMeta.bar && me.chart.isDatasetVisible(datasetIndex) &&
-							(yScale.options.stacked === false ||
-							(yScale.options.stacked === true && stacks.indexOf(dsMeta.stack) === -1) ||
-							(yScale.options.stacked === undefined && (dsMeta.stack === undefined || stacks.indexOf(dsMeta.stack) === -1)))) {
-							stacks.push(dsMeta.stack);
+						var meta = me.chart.getDatasetMeta(datasetIndex);
+						if (meta.bar && me.chart.isDatasetVisible(datasetIndex)) {
+							++barCount;
 						}
 					}, me);
-
-					return stacks.length;
+					return barCount;
 				},
 
 				update: function(reset) {
@@ -91423,7 +90610,7 @@
 					rectangle._datasetIndex = me.index;
 					rectangle._index = index;
 
-					var ruler = me.getRuler(index); // The index argument for compatible
+					var ruler = me.getRuler(index);
 					rectangle._model = {
 						x: me.calculateBarX(index, me.index, ruler),
 						y: reset ? scaleBase : me.calculateBarY(index, me.index),
@@ -91433,7 +90620,6 @@
 						datasetLabel: dataset.label,
 
 						// Appearance
-						horizontal: false,
 						base: reset ? scaleBase : me.calculateBarBase(me.index, index),
 						width: me.calculateBarWidth(ruler),
 						backgroundColor: custom.backgroundColor ? custom.backgroundColor : helpers.getValueAtIndexOrDefault(dataset.backgroundColor, index, rectangleElementOptions.backgroundColor),
@@ -91449,11 +90635,9 @@
 					var me = this;
 					var meta = me.getMeta();
 					var yScale = me.getScaleForId(meta.yAxisID);
-					var base = yScale.getBaseValue();
-					var original = base;
+					var base = 0;
 
-					if ((yScale.options.stacked === true) ||
-						(yScale.options.stacked === undefined && meta.stack !== undefined)) {
+					if (yScale.options.stacked) {
 						var chart = me.chart;
 						var datasets = chart.data.datasets;
 						var value = Number(datasets[datasetIndex].data[index]);
@@ -91461,10 +90645,9 @@
 						for (var i = 0; i < datasetIndex; i++) {
 							var currentDs = datasets[i];
 							var currentDsMeta = chart.getDatasetMeta(i);
-							if (currentDsMeta.bar && currentDsMeta.yAxisID === yScale.id && chart.isDatasetVisible(i) &&
-								meta.stack === currentDsMeta.stack) {
+							if (currentDsMeta.bar && currentDsMeta.yAxisID === yScale.id && chart.isDatasetVisible(i)) {
 								var currentVal = Number(currentDs.data[index]);
-								base += value < 0 ? Math.min(currentVal, original) : Math.max(currentVal, original);
+								base += value < 0 ? Math.min(currentVal, 0) : Math.max(currentVal, 0);
 							}
 						}
 
@@ -91474,22 +90657,34 @@
 					return yScale.getBasePixel();
 				},
 
-				getRuler: function() {
+				getRuler: function(index) {
 					var me = this;
 					var meta = me.getMeta();
 					var xScale = me.getScaleForId(meta.xAxisID);
-					var stackCount = me.getStackCount();
+					var datasetCount = me.getBarCount();
 
-					var tickWidth = xScale.width / xScale.ticks.length;
+					var tickWidth;
+
+					if (xScale.options.type === 'category') {
+						tickWidth = xScale.getPixelForTick(index + 1) - xScale.getPixelForTick(index);
+					} else {
+						// Average width
+						tickWidth = xScale.width / xScale.ticks.length;
+					}
 					var categoryWidth = tickWidth * xScale.options.categoryPercentage;
 					var categorySpacing = (tickWidth - (tickWidth * xScale.options.categoryPercentage)) / 2;
-					var fullBarWidth = categoryWidth / stackCount;
+					var fullBarWidth = categoryWidth / datasetCount;
+
+					if (xScale.ticks.length !== me.chart.data.labels.length) {
+						var perc = xScale.ticks.length / me.chart.data.labels.length;
+						fullBarWidth = fullBarWidth * perc;
+					}
 
 					var barWidth = fullBarWidth * xScale.options.barPercentage;
 					var barSpacing = fullBarWidth - (fullBarWidth * xScale.options.barPercentage);
 
 					return {
-						stackCount: stackCount,
+						datasetCount: datasetCount,
 						tickWidth: tickWidth,
 						categoryWidth: categoryWidth,
 						categorySpacing: categorySpacing,
@@ -91500,50 +90695,46 @@
 				},
 
 				calculateBarWidth: function(ruler) {
-					var me = this;
-					var meta = me.getMeta();
-					var xScale = me.getScaleForId(meta.xAxisID);
+					var xScale = this.getScaleForId(this.getMeta().xAxisID);
 					if (xScale.options.barThickness) {
 						return xScale.options.barThickness;
 					}
-					return ruler.barWidth;
+					return xScale.options.stacked ? ruler.categoryWidth : ruler.barWidth;
 				},
 
-				// Get stack index from the given dataset index accounting for stacks and the fact that not all bars are visible
-				getStackIndex: function(datasetIndex) {
-					var me = this;
-					var meta = me.chart.getDatasetMeta(datasetIndex);
-					var yScale = me.getScaleForId(meta.yAxisID);
-					var dsMeta, j;
-					var stacks = [meta.stack];
+				// Get bar index from the given dataset index accounting for the fact that not all bars are visible
+				getBarIndex: function(datasetIndex) {
+					var barIndex = 0;
+					var meta, j;
 
 					for (j = 0; j < datasetIndex; ++j) {
-						dsMeta = this.chart.getDatasetMeta(j);
-						if (dsMeta.bar && this.chart.isDatasetVisible(j) &&
-							(yScale.options.stacked === false ||
-							(yScale.options.stacked === true && stacks.indexOf(dsMeta.stack) === -1) ||
-							(yScale.options.stacked === undefined && (dsMeta.stack === undefined || stacks.indexOf(dsMeta.stack) === -1)))) {
-							stacks.push(dsMeta.stack);
+						meta = this.chart.getDatasetMeta(j);
+						if (meta.bar && this.chart.isDatasetVisible(j)) {
+							++barIndex;
 						}
 					}
 
-					return stacks.length - 1;
+					return barIndex;
 				},
 
 				calculateBarX: function(index, datasetIndex, ruler) {
 					var me = this;
 					var meta = me.getMeta();
 					var xScale = me.getScaleForId(meta.xAxisID);
-					var stackIndex = me.getStackIndex(datasetIndex);
+					var barIndex = me.getBarIndex(datasetIndex);
 					var leftTick = xScale.getPixelForValue(null, index, datasetIndex, me.chart.isCombo);
 					leftTick -= me.chart.isCombo ? (ruler.tickWidth / 2) : 0;
+
+					if (xScale.options.stacked) {
+						return leftTick + (ruler.categoryWidth / 2) + ruler.categorySpacing;
+					}
 
 					return leftTick +
 						(ruler.barWidth / 2) +
 						ruler.categorySpacing +
-						(ruler.barWidth * stackIndex) +
+						(ruler.barWidth * barIndex) +
 						(ruler.barSpacing / 2) +
-						(ruler.barSpacing * stackIndex);
+						(ruler.barSpacing * barIndex);
 				},
 
 				calculateBarY: function(index, datasetIndex) {
@@ -91552,17 +90743,15 @@
 					var yScale = me.getScaleForId(meta.yAxisID);
 					var value = Number(me.getDataset().data[index]);
 
-					if (yScale.options.stacked ||
-						(yScale.options.stacked === undefined && meta.stack !== undefined)) {
-						var base = yScale.getBaseValue();
-						var sumPos = base,
-							sumNeg = base;
+					if (yScale.options.stacked) {
+
+						var sumPos = 0,
+							sumNeg = 0;
 
 						for (var i = 0; i < datasetIndex; i++) {
 							var ds = me.chart.data.datasets[i];
 							var dsMeta = me.chart.getDatasetMeta(i);
-							if (dsMeta.bar && dsMeta.yAxisID === yScale.id && me.chart.isDatasetVisible(i) &&
-								meta.stack === dsMeta.stack) {
+							if (dsMeta.bar && dsMeta.yAxisID === yScale.id && me.chart.isDatasetVisible(i)) {
 								var stackedVal = Number(ds.data[index]);
 								if (stackedVal < 0) {
 									sumNeg += stackedVal || 0;
@@ -91588,14 +90777,12 @@
 					var dataset = me.getDataset();
 					var i, len;
 
-					Chart.canvasHelpers.clipArea(me.chart.chart.ctx, me.chart.chartArea);
 					for (i = 0, len = metaData.length; i < len; ++i) {
 						var d = dataset.data[i];
 						if (d !== null && d !== undefined && !isNaN(d)) {
 							metaData[i].transition(easingDecimal).draw();
 						}
 					}
-					Chart.canvasHelpers.unclipArea(me.chart.chart.ctx);
 				},
 
 				setHoverStyle: function(rectangle) {
@@ -91680,27 +90867,6 @@
 			};
 
 			Chart.controllers.horizontalBar = Chart.controllers.bar.extend({
-
-				// Correctly calculate the bar width accounting for stacks and the fact that not all bars are visible
-				getStackCount: function() {
-					var me = this;
-					var meta = me.getMeta();
-					var xScale = me.getScaleForId(meta.xAxisID);
-
-					var stacks = [];
-					helpers.each(me.chart.data.datasets, function(dataset, datasetIndex) {
-						var dsMeta = me.chart.getDatasetMeta(datasetIndex);
-						if (dsMeta.bar && me.chart.isDatasetVisible(datasetIndex) &&
-							(xScale.options.stacked === false ||
-							(xScale.options.stacked === true && stacks.indexOf(dsMeta.stack) === -1) ||
-							(xScale.options.stacked === undefined && (dsMeta.stack === undefined || stacks.indexOf(dsMeta.stack) === -1)))) {
-							stacks.push(dsMeta.stack);
-						}
-					}, me);
-
-					return stacks.length;
-				},
-
 				updateElement: function(rectangle, index, reset) {
 					var me = this;
 					var meta = me.getMeta();
@@ -91716,7 +90882,7 @@
 					rectangle._datasetIndex = me.index;
 					rectangle._index = index;
 
-					var ruler = me.getRuler(index); // The index argument for compatible
+					var ruler = me.getRuler(index);
 					rectangle._model = {
 						x: reset ? scaleBase : me.calculateBarX(index, me.index),
 						y: me.calculateBarY(index, me.index, ruler),
@@ -91726,13 +90892,68 @@
 						datasetLabel: dataset.label,
 
 						// Appearance
-						horizontal: true,
 						base: reset ? scaleBase : me.calculateBarBase(me.index, index),
 						height: me.calculateBarHeight(ruler),
 						backgroundColor: custom.backgroundColor ? custom.backgroundColor : helpers.getValueAtIndexOrDefault(dataset.backgroundColor, index, rectangleElementOptions.backgroundColor),
 						borderSkipped: custom.borderSkipped ? custom.borderSkipped : rectangleElementOptions.borderSkipped,
 						borderColor: custom.borderColor ? custom.borderColor : helpers.getValueAtIndexOrDefault(dataset.borderColor, index, rectangleElementOptions.borderColor),
 						borderWidth: custom.borderWidth ? custom.borderWidth : helpers.getValueAtIndexOrDefault(dataset.borderWidth, index, rectangleElementOptions.borderWidth)
+					};
+					rectangle.draw = function() {
+						var ctx = this._chart.ctx;
+						var vm = this._view;
+
+						var halfHeight = vm.height / 2,
+							topY = vm.y - halfHeight,
+							bottomY = vm.y + halfHeight,
+							right = vm.base - (vm.base - vm.x),
+							halfStroke = vm.borderWidth / 2;
+
+						// Canvas doesn't allow us to stroke inside the width so we can
+						// adjust the sizes to fit if we're setting a stroke on the line
+						if (vm.borderWidth) {
+							topY += halfStroke;
+							bottomY -= halfStroke;
+							right += halfStroke;
+						}
+
+						ctx.beginPath();
+
+						ctx.fillStyle = vm.backgroundColor;
+						ctx.strokeStyle = vm.borderColor;
+						ctx.lineWidth = vm.borderWidth;
+
+						// Corner points, from bottom-left to bottom-right clockwise
+						// | 1 2 |
+						// | 0 3 |
+						var corners = [
+							[vm.base, bottomY],
+							[vm.base, topY],
+							[right, topY],
+							[right, bottomY]
+						];
+
+						// Find first (starting) corner with fallback to 'bottom'
+						var borders = ['bottom', 'left', 'top', 'right'];
+						var startCorner = borders.indexOf(vm.borderSkipped, 0);
+						if (startCorner === -1) {
+							startCorner = 0;
+						}
+
+						function cornerAt(cornerIndex) {
+							return corners[(startCorner + cornerIndex) % 4];
+						}
+
+						// Draw rectangle from 'startCorner'
+						ctx.moveTo.apply(ctx, cornerAt(0));
+						for (var i = 1; i < 4; i++) {
+							ctx.lineTo.apply(ctx, cornerAt(i));
+						}
+
+						ctx.fill();
+						if (vm.borderWidth) {
+							ctx.stroke();
+						}
 					};
 
 					rectangle.pivot();
@@ -91742,11 +90963,9 @@
 					var me = this;
 					var meta = me.getMeta();
 					var xScale = me.getScaleForId(meta.xAxisID);
-					var base = xScale.getBaseValue();
-					var originalBase = base;
+					var base = 0;
 
-					if (xScale.options.stacked ||
-						(xScale.options.stacked === undefined && meta.stack !== undefined)) {
+					if (xScale.options.stacked) {
 						var chart = me.chart;
 						var datasets = chart.data.datasets;
 						var value = Number(datasets[datasetIndex].data[index]);
@@ -91754,10 +90973,9 @@
 						for (var i = 0; i < datasetIndex; i++) {
 							var currentDs = datasets[i];
 							var currentDsMeta = chart.getDatasetMeta(i);
-							if (currentDsMeta.bar && currentDsMeta.xAxisID === xScale.id && chart.isDatasetVisible(i) &&
-								meta.stack === currentDsMeta.stack) {
+							if (currentDsMeta.bar && currentDsMeta.xAxisID === xScale.id && chart.isDatasetVisible(i)) {
 								var currentVal = Number(currentDs.data[index]);
-								base += value < 0 ? Math.min(currentVal, originalBase) : Math.max(currentVal, originalBase);
+								base += value < 0 ? Math.min(currentVal, 0) : Math.max(currentVal, 0);
 							}
 						}
 
@@ -91767,22 +90985,33 @@
 					return xScale.getBasePixel();
 				},
 
-				getRuler: function() {
+				getRuler: function(index) {
 					var me = this;
 					var meta = me.getMeta();
 					var yScale = me.getScaleForId(meta.yAxisID);
-					var stackCount = me.getStackCount();
+					var datasetCount = me.getBarCount();
 
-					var tickHeight = yScale.height / yScale.ticks.length;
+					var tickHeight;
+					if (yScale.options.type === 'category') {
+						tickHeight = yScale.getPixelForTick(index + 1) - yScale.getPixelForTick(index);
+					} else {
+						// Average width
+						tickHeight = yScale.width / yScale.ticks.length;
+					}
 					var categoryHeight = tickHeight * yScale.options.categoryPercentage;
 					var categorySpacing = (tickHeight - (tickHeight * yScale.options.categoryPercentage)) / 2;
-					var fullBarHeight = categoryHeight / stackCount;
+					var fullBarHeight = categoryHeight / datasetCount;
+
+					if (yScale.ticks.length !== me.chart.data.labels.length) {
+						var perc = yScale.ticks.length / me.chart.data.labels.length;
+						fullBarHeight = fullBarHeight * perc;
+					}
 
 					var barHeight = fullBarHeight * yScale.options.barPercentage;
 					var barSpacing = fullBarHeight - (fullBarHeight * yScale.options.barPercentage);
 
 					return {
-						stackCount: stackCount,
+						datasetCount: datasetCount,
 						tickHeight: tickHeight,
 						categoryHeight: categoryHeight,
 						categorySpacing: categorySpacing,
@@ -91794,33 +91023,11 @@
 
 				calculateBarHeight: function(ruler) {
 					var me = this;
-					var meta = me.getMeta();
-					var yScale = me.getScaleForId(meta.yAxisID);
+					var yScale = me.getScaleForId(me.getMeta().yAxisID);
 					if (yScale.options.barThickness) {
 						return yScale.options.barThickness;
 					}
-					return ruler.barHeight;
-				},
-
-				// Get stack index from the given dataset index accounting for stacks and the fact that not all bars are visible
-				getStackIndex: function(datasetIndex) {
-					var me = this;
-					var meta = me.chart.getDatasetMeta(datasetIndex);
-					var xScale = me.getScaleForId(meta.xAxisID);
-					var dsMeta, j;
-					var stacks = [meta.stack];
-
-					for (j = 0; j < datasetIndex; ++j) {
-						dsMeta = this.chart.getDatasetMeta(j);
-						if (dsMeta.bar && this.chart.isDatasetVisible(j) &&
-							(xScale.options.stacked === false ||
-							(xScale.options.stacked === true && stacks.indexOf(dsMeta.stack) === -1) ||
-							(xScale.options.stacked === undefined && (dsMeta.stack === undefined || stacks.indexOf(dsMeta.stack) === -1)))) {
-							stacks.push(dsMeta.stack);
-						}
-					}
-
-					return stacks.length - 1;
+					return yScale.options.stacked ? ruler.categoryHeight : ruler.barHeight;
 				},
 
 				calculateBarX: function(index, datasetIndex) {
@@ -91829,17 +91036,15 @@
 					var xScale = me.getScaleForId(meta.xAxisID);
 					var value = Number(me.getDataset().data[index]);
 
-					if (xScale.options.stacked ||
-						(xScale.options.stacked === undefined && meta.stack !== undefined)) {
-						var base = xScale.getBaseValue();
-						var sumPos = base,
-							sumNeg = base;
+					if (xScale.options.stacked) {
+
+						var sumPos = 0,
+							sumNeg = 0;
 
 						for (var i = 0; i < datasetIndex; i++) {
 							var ds = me.chart.data.datasets[i];
 							var dsMeta = me.chart.getDatasetMeta(i);
-							if (dsMeta.bar && dsMeta.xAxisID === xScale.id && me.chart.isDatasetVisible(i) &&
-								meta.stack === dsMeta.stack) {
+							if (dsMeta.bar && dsMeta.xAxisID === xScale.id && me.chart.isDatasetVisible(i)) {
 								var stackedVal = Number(ds.data[index]);
 								if (stackedVal < 0) {
 									sumNeg += stackedVal || 0;
@@ -91862,23 +91067,27 @@
 					var me = this;
 					var meta = me.getMeta();
 					var yScale = me.getScaleForId(meta.yAxisID);
-					var stackIndex = me.getStackIndex(datasetIndex);
+					var barIndex = me.getBarIndex(datasetIndex);
 					var topTick = yScale.getPixelForValue(null, index, datasetIndex, me.chart.isCombo);
 					topTick -= me.chart.isCombo ? (ruler.tickHeight / 2) : 0;
+
+					if (yScale.options.stacked) {
+						return topTick + (ruler.categoryHeight / 2) + ruler.categorySpacing;
+					}
 
 					return topTick +
 						(ruler.barHeight / 2) +
 						ruler.categorySpacing +
-						(ruler.barHeight * stackIndex) +
+						(ruler.barHeight * barIndex) +
 						(ruler.barSpacing / 2) +
-						(ruler.barSpacing * stackIndex);
+						(ruler.barSpacing * barIndex);
 				}
 			});
 		};
 
 
 	/***/ },
-	/* 150 */
+	/* 148 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -92006,7 +91215,7 @@
 
 
 	/***/ },
-	/* 151 */
+	/* 149 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -92194,7 +91403,7 @@
 
 					chart.borderWidth = me.getMaxBorderWidth(meta.data);
 					chart.outerRadius = Math.max((minSize - chart.borderWidth) / 2, 0);
-					chart.innerRadius = Math.max(cutoutPercentage ? (chart.outerRadius / 100) * (cutoutPercentage) : 0, 0);
+					chart.innerRadius = Math.max(cutoutPercentage ? (chart.outerRadius / 100) * (cutoutPercentage) : 1, 0);
 					chart.radiusLength = (chart.outerRadius - chart.innerRadius) / chart.getVisibleDatasetCount();
 					chart.offsetX = offset.x * chart.outerRadius;
 					chart.offsetY = offset.y * chart.outerRadius;
@@ -92202,7 +91411,7 @@
 					meta.total = me.calculateTotal();
 
 					me.outerRadius = chart.outerRadius - (chart.radiusLength * me.getRingIndex(me.index));
-					me.innerRadius = Math.max(me.outerRadius - chart.radiusLength, 0);
+					me.innerRadius = me.outerRadius - chart.radiusLength;
 
 					helpers.each(meta.data, function(arc, index) {
 						me.updateElement(arc, index, reset);
@@ -92315,7 +91524,7 @@
 
 
 	/***/ },
-	/* 152 */
+	/* 150 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -92459,11 +91668,11 @@
 					var dataset = this.getDataset();
 					var custom = point.custom || {};
 
-					if (!isNaN(custom.borderWidth)) {
+					if (custom.borderWidth) {
 						borderWidth = custom.borderWidth;
-					} else if (!isNaN(dataset.pointBorderWidth)) {
+					} else if (dataset.pointBorderWidth) {
 						borderWidth = helpers.getValueAtIndexOrDefault(dataset.pointBorderWidth, index, borderWidth);
-					} else if (!isNaN(dataset.borderWidth)) {
+					} else if (dataset.borderWidth) {
 						borderWidth = dataset.borderWidth;
 					}
 
@@ -92612,16 +91821,14 @@
 						points[i].transition(easingDecimal);
 					}
 
-					Chart.canvasHelpers.clipArea(me.chart.chart.ctx, me.chart.chartArea);
 					// Transition and Draw the line
 					if (lineEnabled(me.getDataset(), me.chart.options)) {
 						meta.dataset.transition(easingDecimal).draw();
 					}
-					Chart.canvasHelpers.unclipArea(me.chart.chart.ctx);
 
 					// Draw the points
 					for (i=0, ilen=points.length; i<ilen; ++i) {
-						points[i].draw(me.chart.chartArea);
+						points[i].draw();
 					}
 				},
 
@@ -92660,7 +91867,7 @@
 
 
 	/***/ },
-	/* 153 */
+	/* 151 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -92881,7 +92088,7 @@
 
 
 	/***/ },
-	/* 154 */
+	/* 152 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -92981,7 +92188,7 @@
 							y: reset ? scale.yCenter : pointPosition.y,
 
 							// Appearance
-							tension: custom.tension ? custom.tension : helpers.getValueOrDefault(dataset.lineTension, me.chart.options.elements.line.tension),
+							tension: custom.tension ? custom.tension : helpers.getValueOrDefault(dataset.tension, me.chart.options.elements.line.tension),
 							radius: custom.radius ? custom.radius : helpers.getValueAtIndexOrDefault(dataset.pointRadius, index, pointElementOptions.radius),
 							backgroundColor: custom.backgroundColor ? custom.backgroundColor : helpers.getValueAtIndexOrDefault(dataset.pointBackgroundColor, index, pointElementOptions.backgroundColor),
 							borderColor: custom.borderColor ? custom.borderColor : helpers.getValueAtIndexOrDefault(dataset.pointBorderColor, index, pointElementOptions.borderColor),
@@ -93068,7 +92275,7 @@
 
 
 	/***/ },
-	/* 155 */
+	/* 153 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -93085,7 +92292,7 @@
 
 
 	/***/ },
-	/* 156 */
+	/* 154 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -93101,7 +92308,7 @@
 
 
 	/***/ },
-	/* 157 */
+	/* 155 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -93118,7 +92325,7 @@
 
 
 	/***/ },
-	/* 158 */
+	/* 156 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -93135,7 +92342,7 @@
 
 
 	/***/ },
-	/* 159 */
+	/* 157 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -93152,7 +92359,7 @@
 
 
 	/***/ },
-	/* 160 */
+	/* 158 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -93169,7 +92376,7 @@
 
 
 	/***/ },
-	/* 161 */
+	/* 159 */
 	/***/ function(module, exports) {
 
 		'use strict';
@@ -93222,7 +92429,7 @@
 
 
 	/***/ },
-	/* 162 */
+	/* 160 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -93232,7 +92439,7 @@
 		});
 		exports.mergeOptions = mergeOptions;
 
-		var _merge = __webpack_require__(163);
+		var _merge = __webpack_require__(161);
 
 		var _merge2 = _interopRequireDefault(_merge);
 
@@ -93243,22 +92450,22 @@
 		}
 
 	/***/ },
-	/* 163 */
+	/* 161 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var convert = __webpack_require__(164),
-		    func = convert('merge', __webpack_require__(370));
+		var convert = __webpack_require__(162),
+		    func = convert('merge', __webpack_require__(368));
 
-		func.placeholder = __webpack_require__(167);
+		func.placeholder = __webpack_require__(165);
 		module.exports = func;
 
 
 	/***/ },
-	/* 164 */
+	/* 162 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseConvert = __webpack_require__(165),
-		    util = __webpack_require__(168);
+		var baseConvert = __webpack_require__(163),
+		    util = __webpack_require__(166);
 
 		/**
 		 * Converts `func` of `name` to an immutable auto-curried iteratee-first data-last
@@ -93278,11 +92485,11 @@
 
 
 	/***/ },
-	/* 165 */
+	/* 163 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var mapping = __webpack_require__(166),
-		    fallbackHolder = __webpack_require__(167);
+		var mapping = __webpack_require__(164),
+		    fallbackHolder = __webpack_require__(165);
 
 		/** Built-in value reference. */
 		var push = Array.prototype.push;
@@ -93852,7 +93059,7 @@
 
 
 	/***/ },
-	/* 166 */
+	/* 164 */
 	/***/ function(module, exports) {
 
 		/** Used to map aliases to their real names. */
@@ -94226,7 +93433,7 @@
 
 
 	/***/ },
-	/* 167 */
+	/* 165 */
 	/***/ function(module, exports) {
 
 		/**
@@ -94238,30 +93445,30 @@
 
 
 	/***/ },
-	/* 168 */
+	/* 166 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		module.exports = {
-		  'ary': __webpack_require__(169),
-		  'assign': __webpack_require__(238),
-		  'clone': __webpack_require__(260),
-		  'curry': __webpack_require__(327),
-		  'forEach': __webpack_require__(222),
-		  'isArray': __webpack_require__(208),
-		  'isFunction': __webpack_require__(177),
-		  'iteratee': __webpack_require__(328),
-		  'keys': __webpack_require__(255),
-		  'rearg': __webpack_require__(363),
-		  'toInteger': __webpack_require__(234),
-		  'toPath': __webpack_require__(369)
+		  'ary': __webpack_require__(167),
+		  'assign': __webpack_require__(236),
+		  'clone': __webpack_require__(258),
+		  'curry': __webpack_require__(325),
+		  'forEach': __webpack_require__(220),
+		  'isArray': __webpack_require__(206),
+		  'isFunction': __webpack_require__(175),
+		  'iteratee': __webpack_require__(326),
+		  'keys': __webpack_require__(253),
+		  'rearg': __webpack_require__(361),
+		  'toInteger': __webpack_require__(232),
+		  'toPath': __webpack_require__(367)
 		};
 
 
 	/***/ },
-	/* 169 */
+	/* 167 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var createWrap = __webpack_require__(170);
+		var createWrap = __webpack_require__(168);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_ARY_FLAG = 128;
@@ -94293,19 +93500,19 @@
 
 
 	/***/ },
-	/* 170 */
+	/* 168 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseSetData = __webpack_require__(171),
-		    createBind = __webpack_require__(189),
-		    createCurry = __webpack_require__(192),
-		    createHybrid = __webpack_require__(194),
-		    createPartial = __webpack_require__(232),
-		    getData = __webpack_require__(202),
-		    mergeData = __webpack_require__(233),
-		    setData = __webpack_require__(212),
-		    setWrapToString = __webpack_require__(214),
-		    toInteger = __webpack_require__(234);
+		var baseSetData = __webpack_require__(169),
+		    createBind = __webpack_require__(187),
+		    createCurry = __webpack_require__(190),
+		    createHybrid = __webpack_require__(192),
+		    createPartial = __webpack_require__(230),
+		    getData = __webpack_require__(200),
+		    mergeData = __webpack_require__(231),
+		    setData = __webpack_require__(210),
+		    setWrapToString = __webpack_require__(212),
+		    toInteger = __webpack_require__(232);
 
 		/** Error message constants. */
 		var FUNC_ERROR_TEXT = 'Expected a function';
@@ -94405,11 +93612,11 @@
 
 
 	/***/ },
-	/* 171 */
+	/* 169 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var identity = __webpack_require__(172),
-		    metaMap = __webpack_require__(173);
+		var identity = __webpack_require__(170),
+		    metaMap = __webpack_require__(171);
 
 		/**
 		 * The base implementation of `setData` without support for hot loop shorting.
@@ -94428,7 +93635,7 @@
 
 
 	/***/ },
-	/* 172 */
+	/* 170 */
 	/***/ function(module, exports) {
 
 		/**
@@ -94455,10 +93662,10 @@
 
 
 	/***/ },
-	/* 173 */
+	/* 171 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var WeakMap = __webpack_require__(174);
+		var WeakMap = __webpack_require__(172);
 
 		/** Used to store function metadata. */
 		var metaMap = WeakMap && new WeakMap;
@@ -94467,11 +93674,11 @@
 
 
 	/***/ },
-	/* 174 */
+	/* 172 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getNative = __webpack_require__(175),
-		    root = __webpack_require__(180);
+		var getNative = __webpack_require__(173),
+		    root = __webpack_require__(178);
 
 		/* Built-in method references that are verified to be native. */
 		var WeakMap = getNative(root, 'WeakMap');
@@ -94480,11 +93687,11 @@
 
 
 	/***/ },
-	/* 175 */
+	/* 173 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseIsNative = __webpack_require__(176),
-		    getValue = __webpack_require__(188);
+		var baseIsNative = __webpack_require__(174),
+		    getValue = __webpack_require__(186);
 
 		/**
 		 * Gets the native function at `key` of `object`.
@@ -94503,13 +93710,13 @@
 
 
 	/***/ },
-	/* 176 */
+	/* 174 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isFunction = __webpack_require__(177),
-		    isMasked = __webpack_require__(185),
-		    isObject = __webpack_require__(184),
-		    toSource = __webpack_require__(187);
+		var isFunction = __webpack_require__(175),
+		    isMasked = __webpack_require__(183),
+		    isObject = __webpack_require__(182),
+		    toSource = __webpack_require__(185);
 
 		/**
 		 * Used to match `RegExp`
@@ -94556,11 +93763,11 @@
 
 
 	/***/ },
-	/* 177 */
+	/* 175 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGetTag = __webpack_require__(178),
-		    isObject = __webpack_require__(184);
+		var baseGetTag = __webpack_require__(176),
+		    isObject = __webpack_require__(182);
 
 		/** `Object#toString` result references. */
 		var asyncTag = '[object AsyncFunction]',
@@ -94599,12 +93806,12 @@
 
 
 	/***/ },
-	/* 178 */
+	/* 176 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Symbol = __webpack_require__(179),
-		    getRawTag = __webpack_require__(182),
-		    objectToString = __webpack_require__(183);
+		var Symbol = __webpack_require__(177),
+		    getRawTag = __webpack_require__(180),
+		    objectToString = __webpack_require__(181);
 
 		/** `Object#toString` result references. */
 		var nullTag = '[object Null]',
@@ -94633,10 +93840,10 @@
 
 
 	/***/ },
-	/* 179 */
+	/* 177 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var root = __webpack_require__(180);
+		var root = __webpack_require__(178);
 
 		/** Built-in value references. */
 		var Symbol = root.Symbol;
@@ -94645,10 +93852,10 @@
 
 
 	/***/ },
-	/* 180 */
+	/* 178 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var freeGlobal = __webpack_require__(181);
+		var freeGlobal = __webpack_require__(179);
 
 		/** Detect free variable `self`. */
 		var freeSelf = typeof self == 'object' && self && self.Object === Object && self;
@@ -94660,7 +93867,7 @@
 
 
 	/***/ },
-	/* 181 */
+	/* 179 */
 	/***/ function(module, exports) {
 
 		/* WEBPACK VAR INJECTION */(function(global) {/** Detect free variable `global` from Node.js. */
@@ -94671,10 +93878,10 @@
 		/* WEBPACK VAR INJECTION */}.call(exports, (function() { return this; }())))
 
 	/***/ },
-	/* 182 */
+	/* 180 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Symbol = __webpack_require__(179);
+		var Symbol = __webpack_require__(177);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -94723,7 +93930,7 @@
 
 
 	/***/ },
-	/* 183 */
+	/* 181 */
 	/***/ function(module, exports) {
 
 		/** Used for built-in method references. */
@@ -94751,7 +93958,7 @@
 
 
 	/***/ },
-	/* 184 */
+	/* 182 */
 	/***/ function(module, exports) {
 
 		/**
@@ -94788,10 +93995,10 @@
 
 
 	/***/ },
-	/* 185 */
+	/* 183 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var coreJsData = __webpack_require__(186);
+		var coreJsData = __webpack_require__(184);
 
 		/** Used to detect methods masquerading as native. */
 		var maskSrcKey = (function() {
@@ -94814,10 +94021,10 @@
 
 
 	/***/ },
-	/* 186 */
+	/* 184 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var root = __webpack_require__(180);
+		var root = __webpack_require__(178);
 
 		/** Used to detect overreaching core-js shims. */
 		var coreJsData = root['__core-js_shared__'];
@@ -94826,7 +94033,7 @@
 
 
 	/***/ },
-	/* 187 */
+	/* 185 */
 	/***/ function(module, exports) {
 
 		/** Used for built-in method references. */
@@ -94858,7 +94065,7 @@
 
 
 	/***/ },
-	/* 188 */
+	/* 186 */
 	/***/ function(module, exports) {
 
 		/**
@@ -94877,11 +94084,11 @@
 
 
 	/***/ },
-	/* 189 */
+	/* 187 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var createCtor = __webpack_require__(190),
-		    root = __webpack_require__(180);
+		var createCtor = __webpack_require__(188),
+		    root = __webpack_require__(178);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_BIND_FLAG = 1;
@@ -94911,11 +94118,11 @@
 
 
 	/***/ },
-	/* 190 */
+	/* 188 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseCreate = __webpack_require__(191),
-		    isObject = __webpack_require__(184);
+		var baseCreate = __webpack_require__(189),
+		    isObject = __webpack_require__(182);
 
 		/**
 		 * Creates a function that produces an instance of `Ctor` regardless of
@@ -94954,10 +94161,10 @@
 
 
 	/***/ },
-	/* 191 */
+	/* 189 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isObject = __webpack_require__(184);
+		var isObject = __webpack_require__(182);
 
 		/** Built-in value references. */
 		var objectCreate = Object.create;
@@ -94990,16 +94197,16 @@
 
 
 	/***/ },
-	/* 192 */
+	/* 190 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var apply = __webpack_require__(193),
-		    createCtor = __webpack_require__(190),
-		    createHybrid = __webpack_require__(194),
-		    createRecurry = __webpack_require__(198),
-		    getHolder = __webpack_require__(228),
-		    replaceHolders = __webpack_require__(231),
-		    root = __webpack_require__(180);
+		var apply = __webpack_require__(191),
+		    createCtor = __webpack_require__(188),
+		    createHybrid = __webpack_require__(192),
+		    createRecurry = __webpack_require__(196),
+		    getHolder = __webpack_require__(226),
+		    replaceHolders = __webpack_require__(229),
+		    root = __webpack_require__(178);
 
 		/**
 		 * Creates a function that wraps `func` to enable currying.
@@ -95042,7 +94249,7 @@
 
 
 	/***/ },
-	/* 193 */
+	/* 191 */
 	/***/ function(module, exports) {
 
 		/**
@@ -95069,18 +94276,18 @@
 
 
 	/***/ },
-	/* 194 */
+	/* 192 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var composeArgs = __webpack_require__(195),
-		    composeArgsRight = __webpack_require__(196),
-		    countHolders = __webpack_require__(197),
-		    createCtor = __webpack_require__(190),
-		    createRecurry = __webpack_require__(198),
-		    getHolder = __webpack_require__(228),
-		    reorder = __webpack_require__(229),
-		    replaceHolders = __webpack_require__(231),
-		    root = __webpack_require__(180);
+		var composeArgs = __webpack_require__(193),
+		    composeArgsRight = __webpack_require__(194),
+		    countHolders = __webpack_require__(195),
+		    createCtor = __webpack_require__(188),
+		    createRecurry = __webpack_require__(196),
+		    getHolder = __webpack_require__(226),
+		    reorder = __webpack_require__(227),
+		    replaceHolders = __webpack_require__(229),
+		    root = __webpack_require__(178);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_BIND_FLAG = 1,
@@ -95167,7 +94374,7 @@
 
 
 	/***/ },
-	/* 195 */
+	/* 193 */
 	/***/ function(module, exports) {
 
 		/* Built-in method references for those with the same name as other `lodash` methods. */
@@ -95212,7 +94419,7 @@
 
 
 	/***/ },
-	/* 196 */
+	/* 194 */
 	/***/ function(module, exports) {
 
 		/* Built-in method references for those with the same name as other `lodash` methods. */
@@ -95259,7 +94466,7 @@
 
 
 	/***/ },
-	/* 197 */
+	/* 195 */
 	/***/ function(module, exports) {
 
 		/**
@@ -95286,12 +94493,12 @@
 
 
 	/***/ },
-	/* 198 */
+	/* 196 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isLaziable = __webpack_require__(199),
-		    setData = __webpack_require__(212),
-		    setWrapToString = __webpack_require__(214);
+		var isLaziable = __webpack_require__(197),
+		    setData = __webpack_require__(210),
+		    setWrapToString = __webpack_require__(212);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_BIND_FLAG = 1,
@@ -95348,13 +94555,13 @@
 
 
 	/***/ },
-	/* 199 */
+	/* 197 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var LazyWrapper = __webpack_require__(200),
-		    getData = __webpack_require__(202),
-		    getFuncName = __webpack_require__(204),
-		    lodash = __webpack_require__(206);
+		var LazyWrapper = __webpack_require__(198),
+		    getData = __webpack_require__(200),
+		    getFuncName = __webpack_require__(202),
+		    lodash = __webpack_require__(204);
 
 		/**
 		 * Checks if `func` has a lazy counterpart.
@@ -95382,11 +94589,11 @@
 
 
 	/***/ },
-	/* 200 */
+	/* 198 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseCreate = __webpack_require__(191),
-		    baseLodash = __webpack_require__(201);
+		var baseCreate = __webpack_require__(189),
+		    baseLodash = __webpack_require__(199);
 
 		/** Used as references for the maximum length and index of an array. */
 		var MAX_ARRAY_LENGTH = 4294967295;
@@ -95416,7 +94623,7 @@
 
 
 	/***/ },
-	/* 201 */
+	/* 199 */
 	/***/ function(module, exports) {
 
 		/**
@@ -95432,11 +94639,11 @@
 
 
 	/***/ },
-	/* 202 */
+	/* 200 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var metaMap = __webpack_require__(173),
-		    noop = __webpack_require__(203);
+		var metaMap = __webpack_require__(171),
+		    noop = __webpack_require__(201);
 
 		/**
 		 * Gets metadata for `func`.
@@ -95453,7 +94660,7 @@
 
 
 	/***/ },
-	/* 203 */
+	/* 201 */
 	/***/ function(module, exports) {
 
 		/**
@@ -95476,10 +94683,10 @@
 
 
 	/***/ },
-	/* 204 */
+	/* 202 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var realNames = __webpack_require__(205);
+		var realNames = __webpack_require__(203);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -95513,7 +94720,7 @@
 
 
 	/***/ },
-	/* 205 */
+	/* 203 */
 	/***/ function(module, exports) {
 
 		/** Used to lookup unminified function names. */
@@ -95523,15 +94730,15 @@
 
 
 	/***/ },
-	/* 206 */
+	/* 204 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var LazyWrapper = __webpack_require__(200),
-		    LodashWrapper = __webpack_require__(207),
-		    baseLodash = __webpack_require__(201),
-		    isArray = __webpack_require__(208),
-		    isObjectLike = __webpack_require__(209),
-		    wrapperClone = __webpack_require__(210);
+		var LazyWrapper = __webpack_require__(198),
+		    LodashWrapper = __webpack_require__(205),
+		    baseLodash = __webpack_require__(199),
+		    isArray = __webpack_require__(206),
+		    isObjectLike = __webpack_require__(207),
+		    wrapperClone = __webpack_require__(208);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -95676,11 +94883,11 @@
 
 
 	/***/ },
-	/* 207 */
+	/* 205 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseCreate = __webpack_require__(191),
-		    baseLodash = __webpack_require__(201);
+		var baseCreate = __webpack_require__(189),
+		    baseLodash = __webpack_require__(199);
 
 		/**
 		 * The base constructor for creating `lodash` wrapper objects.
@@ -95704,7 +94911,7 @@
 
 
 	/***/ },
-	/* 208 */
+	/* 206 */
 	/***/ function(module, exports) {
 
 		/**
@@ -95736,7 +94943,7 @@
 
 
 	/***/ },
-	/* 209 */
+	/* 207 */
 	/***/ function(module, exports) {
 
 		/**
@@ -95771,12 +94978,12 @@
 
 
 	/***/ },
-	/* 210 */
+	/* 208 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var LazyWrapper = __webpack_require__(200),
-		    LodashWrapper = __webpack_require__(207),
-		    copyArray = __webpack_require__(211);
+		var LazyWrapper = __webpack_require__(198),
+		    LodashWrapper = __webpack_require__(205),
+		    copyArray = __webpack_require__(209);
 
 		/**
 		 * Creates a clone of `wrapper`.
@@ -95800,7 +95007,7 @@
 
 
 	/***/ },
-	/* 211 */
+	/* 209 */
 	/***/ function(module, exports) {
 
 		/**
@@ -95826,11 +95033,11 @@
 
 
 	/***/ },
-	/* 212 */
+	/* 210 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseSetData = __webpack_require__(171),
-		    shortOut = __webpack_require__(213);
+		var baseSetData = __webpack_require__(169),
+		    shortOut = __webpack_require__(211);
 
 		/**
 		 * Sets metadata for `func`.
@@ -95852,7 +95059,7 @@
 
 
 	/***/ },
-	/* 213 */
+	/* 211 */
 	/***/ function(module, exports) {
 
 		/** Used to detect hot functions by number of calls within a span of milliseconds. */
@@ -95895,13 +95102,13 @@
 
 
 	/***/ },
-	/* 214 */
+	/* 212 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getWrapDetails = __webpack_require__(215),
-		    insertWrapDetails = __webpack_require__(216),
-		    setToString = __webpack_require__(217),
-		    updateWrapDetails = __webpack_require__(221);
+		var getWrapDetails = __webpack_require__(213),
+		    insertWrapDetails = __webpack_require__(214),
+		    setToString = __webpack_require__(215),
+		    updateWrapDetails = __webpack_require__(219);
 
 		/**
 		 * Sets the `toString` method of `wrapper` to mimic the source of `reference`
@@ -95922,7 +95129,7 @@
 
 
 	/***/ },
-	/* 215 */
+	/* 213 */
 	/***/ function(module, exports) {
 
 		/** Used to match wrap detail comments. */
@@ -95945,7 +95152,7 @@
 
 
 	/***/ },
-	/* 216 */
+	/* 214 */
 	/***/ function(module, exports) {
 
 		/** Used to match wrap detail comments. */
@@ -95974,11 +95181,11 @@
 
 
 	/***/ },
-	/* 217 */
+	/* 215 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseSetToString = __webpack_require__(218),
-		    shortOut = __webpack_require__(213);
+		var baseSetToString = __webpack_require__(216),
+		    shortOut = __webpack_require__(211);
 
 		/**
 		 * Sets the `toString` method of `func` to return `string`.
@@ -95994,12 +95201,12 @@
 
 
 	/***/ },
-	/* 218 */
+	/* 216 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var constant = __webpack_require__(219),
-		    defineProperty = __webpack_require__(220),
-		    identity = __webpack_require__(172);
+		var constant = __webpack_require__(217),
+		    defineProperty = __webpack_require__(218),
+		    identity = __webpack_require__(170);
 
 		/**
 		 * The base implementation of `setToString` without support for hot loop shorting.
@@ -96022,7 +95229,7 @@
 
 
 	/***/ },
-	/* 219 */
+	/* 217 */
 	/***/ function(module, exports) {
 
 		/**
@@ -96054,10 +95261,10 @@
 
 
 	/***/ },
-	/* 220 */
+	/* 218 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getNative = __webpack_require__(175);
+		var getNative = __webpack_require__(173);
 
 		var defineProperty = (function() {
 		  try {
@@ -96071,11 +95278,11 @@
 
 
 	/***/ },
-	/* 221 */
+	/* 219 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayEach = __webpack_require__(222),
-		    arrayIncludes = __webpack_require__(223);
+		var arrayEach = __webpack_require__(220),
+		    arrayIncludes = __webpack_require__(221);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_BIND_FLAG = 1,
@@ -96123,7 +95330,7 @@
 
 
 	/***/ },
-	/* 222 */
+	/* 220 */
 	/***/ function(module, exports) {
 
 		/**
@@ -96151,10 +95358,10 @@
 
 
 	/***/ },
-	/* 223 */
+	/* 221 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseIndexOf = __webpack_require__(224);
+		var baseIndexOf = __webpack_require__(222);
 
 		/**
 		 * A specialized version of `_.includes` for arrays without support for
@@ -96174,12 +95381,12 @@
 
 
 	/***/ },
-	/* 224 */
+	/* 222 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseFindIndex = __webpack_require__(225),
-		    baseIsNaN = __webpack_require__(226),
-		    strictIndexOf = __webpack_require__(227);
+		var baseFindIndex = __webpack_require__(223),
+		    baseIsNaN = __webpack_require__(224),
+		    strictIndexOf = __webpack_require__(225);
 
 		/**
 		 * The base implementation of `_.indexOf` without `fromIndex` bounds checks.
@@ -96200,7 +95407,7 @@
 
 
 	/***/ },
-	/* 225 */
+	/* 223 */
 	/***/ function(module, exports) {
 
 		/**
@@ -96230,7 +95437,7 @@
 
 
 	/***/ },
-	/* 226 */
+	/* 224 */
 	/***/ function(module, exports) {
 
 		/**
@@ -96248,7 +95455,7 @@
 
 
 	/***/ },
-	/* 227 */
+	/* 225 */
 	/***/ function(module, exports) {
 
 		/**
@@ -96277,7 +95484,7 @@
 
 
 	/***/ },
-	/* 228 */
+	/* 226 */
 	/***/ function(module, exports) {
 
 		/**
@@ -96296,11 +95503,11 @@
 
 
 	/***/ },
-	/* 229 */
+	/* 227 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var copyArray = __webpack_require__(211),
-		    isIndex = __webpack_require__(230);
+		var copyArray = __webpack_require__(209),
+		    isIndex = __webpack_require__(228);
 
 		/* Built-in method references for those with the same name as other `lodash` methods. */
 		var nativeMin = Math.min;
@@ -96331,7 +95538,7 @@
 
 
 	/***/ },
-	/* 230 */
+	/* 228 */
 	/***/ function(module, exports) {
 
 		/** Used as references for various `Number` constants. */
@@ -96359,7 +95566,7 @@
 
 
 	/***/ },
-	/* 231 */
+	/* 229 */
 	/***/ function(module, exports) {
 
 		/** Used as the internal argument placeholder. */
@@ -96394,12 +95601,12 @@
 
 
 	/***/ },
-	/* 232 */
+	/* 230 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var apply = __webpack_require__(193),
-		    createCtor = __webpack_require__(190),
-		    root = __webpack_require__(180);
+		var apply = __webpack_require__(191),
+		    createCtor = __webpack_require__(188),
+		    root = __webpack_require__(178);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_BIND_FLAG = 1;
@@ -96443,12 +95650,12 @@
 
 
 	/***/ },
-	/* 233 */
+	/* 231 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var composeArgs = __webpack_require__(195),
-		    composeArgsRight = __webpack_require__(196),
-		    replaceHolders = __webpack_require__(231);
+		var composeArgs = __webpack_require__(193),
+		    composeArgsRight = __webpack_require__(194),
+		    replaceHolders = __webpack_require__(229);
 
 		/** Used as the internal argument placeholder. */
 		var PLACEHOLDER = '__lodash_placeholder__';
@@ -96539,10 +95746,10 @@
 
 
 	/***/ },
-	/* 234 */
+	/* 232 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var toFinite = __webpack_require__(235);
+		var toFinite = __webpack_require__(233);
 
 		/**
 		 * Converts `value` to an integer.
@@ -96581,10 +95788,10 @@
 
 
 	/***/ },
-	/* 235 */
+	/* 233 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var toNumber = __webpack_require__(236);
+		var toNumber = __webpack_require__(234);
 
 		/** Used as references for various `Number` constants. */
 		var INFINITY = 1 / 0,
@@ -96629,11 +95836,11 @@
 
 
 	/***/ },
-	/* 236 */
+	/* 234 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isObject = __webpack_require__(184),
-		    isSymbol = __webpack_require__(237);
+		var isObject = __webpack_require__(182),
+		    isSymbol = __webpack_require__(235);
 
 		/** Used as references for various `Number` constants. */
 		var NAN = 0 / 0;
@@ -96701,11 +95908,11 @@
 
 
 	/***/ },
-	/* 237 */
+	/* 235 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGetTag = __webpack_require__(178),
-		    isObjectLike = __webpack_require__(209);
+		var baseGetTag = __webpack_require__(176),
+		    isObjectLike = __webpack_require__(207);
 
 		/** `Object#toString` result references. */
 		var symbolTag = '[object Symbol]';
@@ -96736,11 +95943,11 @@
 
 
 	/***/ },
-	/* 238 */
+	/* 236 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var copyObject = __webpack_require__(239),
-		    keys = __webpack_require__(243);
+		var copyObject = __webpack_require__(237),
+		    keys = __webpack_require__(241);
 
 		/**
 		 * The base implementation of `_.assign` without support for multiple sources
@@ -96759,11 +95966,11 @@
 
 
 	/***/ },
-	/* 239 */
+	/* 237 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var assignValue = __webpack_require__(240),
-		    baseAssignValue = __webpack_require__(241);
+		var assignValue = __webpack_require__(238),
+		    baseAssignValue = __webpack_require__(239);
 
 		/**
 		 * Copies properties of `source` to `object`.
@@ -96805,11 +96012,11 @@
 
 
 	/***/ },
-	/* 240 */
+	/* 238 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseAssignValue = __webpack_require__(241),
-		    eq = __webpack_require__(242);
+		var baseAssignValue = __webpack_require__(239),
+		    eq = __webpack_require__(240);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -96839,10 +96046,10 @@
 
 
 	/***/ },
-	/* 241 */
+	/* 239 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var defineProperty = __webpack_require__(220);
+		var defineProperty = __webpack_require__(218);
 
 		/**
 		 * The base implementation of `assignValue` and `assignMergeValue` without
@@ -96870,7 +96077,7 @@
 
 
 	/***/ },
-	/* 242 */
+	/* 240 */
 	/***/ function(module, exports) {
 
 		/**
@@ -96913,12 +96120,12 @@
 
 
 	/***/ },
-	/* 243 */
+	/* 241 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayLikeKeys = __webpack_require__(244),
-		    baseKeys = __webpack_require__(255),
-		    isArrayLike = __webpack_require__(259);
+		var arrayLikeKeys = __webpack_require__(242),
+		    baseKeys = __webpack_require__(253),
+		    isArrayLike = __webpack_require__(257);
 
 		/**
 		 * Creates an array of the own enumerable property names of `object`.
@@ -96956,15 +96163,15 @@
 
 
 	/***/ },
-	/* 244 */
+	/* 242 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseTimes = __webpack_require__(245),
-		    isArguments = __webpack_require__(246),
-		    isArray = __webpack_require__(208),
-		    isBuffer = __webpack_require__(248),
-		    isIndex = __webpack_require__(230),
-		    isTypedArray = __webpack_require__(250);
+		var baseTimes = __webpack_require__(243),
+		    isArguments = __webpack_require__(244),
+		    isArray = __webpack_require__(206),
+		    isBuffer = __webpack_require__(246),
+		    isIndex = __webpack_require__(228),
+		    isTypedArray = __webpack_require__(248);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -97011,7 +96218,7 @@
 
 
 	/***/ },
-	/* 245 */
+	/* 243 */
 	/***/ function(module, exports) {
 
 		/**
@@ -97037,11 +96244,11 @@
 
 
 	/***/ },
-	/* 246 */
+	/* 244 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseIsArguments = __webpack_require__(247),
-		    isObjectLike = __webpack_require__(209);
+		var baseIsArguments = __webpack_require__(245),
+		    isObjectLike = __webpack_require__(207);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -97079,11 +96286,11 @@
 
 
 	/***/ },
-	/* 247 */
+	/* 245 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGetTag = __webpack_require__(178),
-		    isObjectLike = __webpack_require__(209);
+		var baseGetTag = __webpack_require__(176),
+		    isObjectLike = __webpack_require__(207);
 
 		/** `Object#toString` result references. */
 		var argsTag = '[object Arguments]';
@@ -97103,11 +96310,11 @@
 
 
 	/***/ },
-	/* 248 */
+	/* 246 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		/* WEBPACK VAR INJECTION */(function(module) {var root = __webpack_require__(180),
-		    stubFalse = __webpack_require__(249);
+		/* WEBPACK VAR INJECTION */(function(module) {var root = __webpack_require__(178),
+		    stubFalse = __webpack_require__(247);
 
 		/** Detect free variable `exports`. */
 		var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
@@ -97145,10 +96352,10 @@
 
 		module.exports = isBuffer;
 
-		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(39)(module)))
+		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(37)(module)))
 
 	/***/ },
-	/* 249 */
+	/* 247 */
 	/***/ function(module, exports) {
 
 		/**
@@ -97172,12 +96379,12 @@
 
 
 	/***/ },
-	/* 250 */
+	/* 248 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseIsTypedArray = __webpack_require__(251),
-		    baseUnary = __webpack_require__(253),
-		    nodeUtil = __webpack_require__(254);
+		var baseIsTypedArray = __webpack_require__(249),
+		    baseUnary = __webpack_require__(251),
+		    nodeUtil = __webpack_require__(252);
 
 		/* Node.js helper references. */
 		var nodeIsTypedArray = nodeUtil && nodeUtil.isTypedArray;
@@ -97205,12 +96412,12 @@
 
 
 	/***/ },
-	/* 251 */
+	/* 249 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGetTag = __webpack_require__(178),
-		    isLength = __webpack_require__(252),
-		    isObjectLike = __webpack_require__(209);
+		var baseGetTag = __webpack_require__(176),
+		    isLength = __webpack_require__(250),
+		    isObjectLike = __webpack_require__(207);
 
 		/** `Object#toString` result references. */
 		var argsTag = '[object Arguments]',
@@ -97271,7 +96478,7 @@
 
 
 	/***/ },
-	/* 252 */
+	/* 250 */
 	/***/ function(module, exports) {
 
 		/** Used as references for various `Number` constants. */
@@ -97312,7 +96519,7 @@
 
 
 	/***/ },
-	/* 253 */
+	/* 251 */
 	/***/ function(module, exports) {
 
 		/**
@@ -97332,10 +96539,10 @@
 
 
 	/***/ },
-	/* 254 */
+	/* 252 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		/* WEBPACK VAR INJECTION */(function(module) {var freeGlobal = __webpack_require__(181);
+		/* WEBPACK VAR INJECTION */(function(module) {var freeGlobal = __webpack_require__(179);
 
 		/** Detect free variable `exports`. */
 		var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
@@ -97358,14 +96565,14 @@
 
 		module.exports = nodeUtil;
 
-		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(39)(module)))
+		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(37)(module)))
 
 	/***/ },
-	/* 255 */
+	/* 253 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isPrototype = __webpack_require__(256),
-		    nativeKeys = __webpack_require__(257);
+		var isPrototype = __webpack_require__(254),
+		    nativeKeys = __webpack_require__(255);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -97397,7 +96604,7 @@
 
 
 	/***/ },
-	/* 256 */
+	/* 254 */
 	/***/ function(module, exports) {
 
 		/** Used for built-in method references. */
@@ -97421,10 +96628,10 @@
 
 
 	/***/ },
-	/* 257 */
+	/* 255 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var overArg = __webpack_require__(258);
+		var overArg = __webpack_require__(256);
 
 		/* Built-in method references for those with the same name as other `lodash` methods. */
 		var nativeKeys = overArg(Object.keys, Object);
@@ -97433,7 +96640,7 @@
 
 
 	/***/ },
-	/* 258 */
+	/* 256 */
 	/***/ function(module, exports) {
 
 		/**
@@ -97454,11 +96661,11 @@
 
 
 	/***/ },
-	/* 259 */
+	/* 257 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isFunction = __webpack_require__(177),
-		    isLength = __webpack_require__(252);
+		var isFunction = __webpack_require__(175),
+		    isLength = __webpack_require__(250);
 
 		/**
 		 * Checks if `value` is array-like. A value is considered array-like if it's
@@ -97493,10 +96700,10 @@
 
 
 	/***/ },
-	/* 260 */
+	/* 258 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseClone = __webpack_require__(261);
+		var baseClone = __webpack_require__(259);
 
 		/** Used to compose bitmasks for cloning. */
 		var CLONE_SYMBOLS_FLAG = 4;
@@ -97535,28 +96742,28 @@
 
 
 	/***/ },
-	/* 261 */
+	/* 259 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Stack = __webpack_require__(262),
-		    arrayEach = __webpack_require__(222),
-		    assignValue = __webpack_require__(240),
-		    baseAssign = __webpack_require__(238),
-		    baseAssignIn = __webpack_require__(291),
-		    cloneBuffer = __webpack_require__(295),
-		    copyArray = __webpack_require__(211),
-		    copySymbols = __webpack_require__(296),
-		    copySymbolsIn = __webpack_require__(300),
-		    getAllKeys = __webpack_require__(304),
-		    getAllKeysIn = __webpack_require__(306),
-		    getTag = __webpack_require__(307),
-		    initCloneArray = __webpack_require__(311),
-		    initCloneByTag = __webpack_require__(312),
-		    initCloneObject = __webpack_require__(326),
-		    isArray = __webpack_require__(208),
-		    isBuffer = __webpack_require__(248),
-		    isObject = __webpack_require__(184),
-		    keys = __webpack_require__(243);
+		var Stack = __webpack_require__(260),
+		    arrayEach = __webpack_require__(220),
+		    assignValue = __webpack_require__(238),
+		    baseAssign = __webpack_require__(236),
+		    baseAssignIn = __webpack_require__(289),
+		    cloneBuffer = __webpack_require__(293),
+		    copyArray = __webpack_require__(209),
+		    copySymbols = __webpack_require__(294),
+		    copySymbolsIn = __webpack_require__(298),
+		    getAllKeys = __webpack_require__(302),
+		    getAllKeysIn = __webpack_require__(304),
+		    getTag = __webpack_require__(305),
+		    initCloneArray = __webpack_require__(309),
+		    initCloneByTag = __webpack_require__(310),
+		    initCloneObject = __webpack_require__(324),
+		    isArray = __webpack_require__(206),
+		    isBuffer = __webpack_require__(246),
+		    isObject = __webpack_require__(182),
+		    keys = __webpack_require__(241);
 
 		/** Used to compose bitmasks for cloning. */
 		var CLONE_DEEP_FLAG = 1,
@@ -97694,15 +96901,15 @@
 
 
 	/***/ },
-	/* 262 */
+	/* 260 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var ListCache = __webpack_require__(263),
-		    stackClear = __webpack_require__(270),
-		    stackDelete = __webpack_require__(271),
-		    stackGet = __webpack_require__(272),
-		    stackHas = __webpack_require__(273),
-		    stackSet = __webpack_require__(274);
+		var ListCache = __webpack_require__(261),
+		    stackClear = __webpack_require__(268),
+		    stackDelete = __webpack_require__(269),
+		    stackGet = __webpack_require__(270),
+		    stackHas = __webpack_require__(271),
+		    stackSet = __webpack_require__(272);
 
 		/**
 		 * Creates a stack cache object to store key-value pairs.
@@ -97727,14 +96934,14 @@
 
 
 	/***/ },
-	/* 263 */
+	/* 261 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var listCacheClear = __webpack_require__(264),
-		    listCacheDelete = __webpack_require__(265),
-		    listCacheGet = __webpack_require__(267),
-		    listCacheHas = __webpack_require__(268),
-		    listCacheSet = __webpack_require__(269);
+		var listCacheClear = __webpack_require__(262),
+		    listCacheDelete = __webpack_require__(263),
+		    listCacheGet = __webpack_require__(265),
+		    listCacheHas = __webpack_require__(266),
+		    listCacheSet = __webpack_require__(267);
 
 		/**
 		 * Creates an list cache object.
@@ -97765,7 +96972,7 @@
 
 
 	/***/ },
-	/* 264 */
+	/* 262 */
 	/***/ function(module, exports) {
 
 		/**
@@ -97784,10 +96991,10 @@
 
 
 	/***/ },
-	/* 265 */
+	/* 263 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var assocIndexOf = __webpack_require__(266);
+		var assocIndexOf = __webpack_require__(264);
 
 		/** Used for built-in method references. */
 		var arrayProto = Array.prototype;
@@ -97825,10 +97032,10 @@
 
 
 	/***/ },
-	/* 266 */
+	/* 264 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var eq = __webpack_require__(242);
+		var eq = __webpack_require__(240);
 
 		/**
 		 * Gets the index at which the `key` is found in `array` of key-value pairs.
@@ -97852,10 +97059,10 @@
 
 
 	/***/ },
-	/* 267 */
+	/* 265 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var assocIndexOf = __webpack_require__(266);
+		var assocIndexOf = __webpack_require__(264);
 
 		/**
 		 * Gets the list cache value for `key`.
@@ -97877,10 +97084,10 @@
 
 
 	/***/ },
-	/* 268 */
+	/* 266 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var assocIndexOf = __webpack_require__(266);
+		var assocIndexOf = __webpack_require__(264);
 
 		/**
 		 * Checks if a list cache value for `key` exists.
@@ -97899,10 +97106,10 @@
 
 
 	/***/ },
-	/* 269 */
+	/* 267 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var assocIndexOf = __webpack_require__(266);
+		var assocIndexOf = __webpack_require__(264);
 
 		/**
 		 * Sets the list cache `key` to `value`.
@@ -97931,10 +97138,10 @@
 
 
 	/***/ },
-	/* 270 */
+	/* 268 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var ListCache = __webpack_require__(263);
+		var ListCache = __webpack_require__(261);
 
 		/**
 		 * Removes all key-value entries from the stack.
@@ -97952,7 +97159,7 @@
 
 
 	/***/ },
-	/* 271 */
+	/* 269 */
 	/***/ function(module, exports) {
 
 		/**
@@ -97976,7 +97183,7 @@
 
 
 	/***/ },
-	/* 272 */
+	/* 270 */
 	/***/ function(module, exports) {
 
 		/**
@@ -97996,7 +97203,7 @@
 
 
 	/***/ },
-	/* 273 */
+	/* 271 */
 	/***/ function(module, exports) {
 
 		/**
@@ -98016,12 +97223,12 @@
 
 
 	/***/ },
-	/* 274 */
+	/* 272 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var ListCache = __webpack_require__(263),
-		    Map = __webpack_require__(275),
-		    MapCache = __webpack_require__(276);
+		var ListCache = __webpack_require__(261),
+		    Map = __webpack_require__(273),
+		    MapCache = __webpack_require__(274);
 
 		/** Used as the size to enable large array optimizations. */
 		var LARGE_ARRAY_SIZE = 200;
@@ -98056,11 +97263,11 @@
 
 
 	/***/ },
-	/* 275 */
+	/* 273 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getNative = __webpack_require__(175),
-		    root = __webpack_require__(180);
+		var getNative = __webpack_require__(173),
+		    root = __webpack_require__(178);
 
 		/* Built-in method references that are verified to be native. */
 		var Map = getNative(root, 'Map');
@@ -98069,14 +97276,14 @@
 
 
 	/***/ },
-	/* 276 */
+	/* 274 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var mapCacheClear = __webpack_require__(277),
-		    mapCacheDelete = __webpack_require__(285),
-		    mapCacheGet = __webpack_require__(288),
-		    mapCacheHas = __webpack_require__(289),
-		    mapCacheSet = __webpack_require__(290);
+		var mapCacheClear = __webpack_require__(275),
+		    mapCacheDelete = __webpack_require__(283),
+		    mapCacheGet = __webpack_require__(286),
+		    mapCacheHas = __webpack_require__(287),
+		    mapCacheSet = __webpack_require__(288);
 
 		/**
 		 * Creates a map cache object to store key-value pairs.
@@ -98107,12 +97314,12 @@
 
 
 	/***/ },
-	/* 277 */
+	/* 275 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Hash = __webpack_require__(278),
-		    ListCache = __webpack_require__(263),
-		    Map = __webpack_require__(275);
+		var Hash = __webpack_require__(276),
+		    ListCache = __webpack_require__(261),
+		    Map = __webpack_require__(273);
 
 		/**
 		 * Removes all key-value entries from the map.
@@ -98134,14 +97341,14 @@
 
 
 	/***/ },
-	/* 278 */
+	/* 276 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var hashClear = __webpack_require__(279),
-		    hashDelete = __webpack_require__(281),
-		    hashGet = __webpack_require__(282),
-		    hashHas = __webpack_require__(283),
-		    hashSet = __webpack_require__(284);
+		var hashClear = __webpack_require__(277),
+		    hashDelete = __webpack_require__(279),
+		    hashGet = __webpack_require__(280),
+		    hashHas = __webpack_require__(281),
+		    hashSet = __webpack_require__(282);
 
 		/**
 		 * Creates a hash object.
@@ -98172,10 +97379,10 @@
 
 
 	/***/ },
-	/* 279 */
+	/* 277 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var nativeCreate = __webpack_require__(280);
+		var nativeCreate = __webpack_require__(278);
 
 		/**
 		 * Removes all key-value entries from the hash.
@@ -98193,10 +97400,10 @@
 
 
 	/***/ },
-	/* 280 */
+	/* 278 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getNative = __webpack_require__(175);
+		var getNative = __webpack_require__(173);
 
 		/* Built-in method references that are verified to be native. */
 		var nativeCreate = getNative(Object, 'create');
@@ -98205,7 +97412,7 @@
 
 
 	/***/ },
-	/* 281 */
+	/* 279 */
 	/***/ function(module, exports) {
 
 		/**
@@ -98228,10 +97435,10 @@
 
 
 	/***/ },
-	/* 282 */
+	/* 280 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var nativeCreate = __webpack_require__(280);
+		var nativeCreate = __webpack_require__(278);
 
 		/** Used to stand-in for `undefined` hash values. */
 		var HASH_UNDEFINED = '__lodash_hash_undefined__';
@@ -98264,10 +97471,10 @@
 
 
 	/***/ },
-	/* 283 */
+	/* 281 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var nativeCreate = __webpack_require__(280);
+		var nativeCreate = __webpack_require__(278);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -98293,10 +97500,10 @@
 
 
 	/***/ },
-	/* 284 */
+	/* 282 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var nativeCreate = __webpack_require__(280);
+		var nativeCreate = __webpack_require__(278);
 
 		/** Used to stand-in for `undefined` hash values. */
 		var HASH_UNDEFINED = '__lodash_hash_undefined__';
@@ -98322,10 +97529,10 @@
 
 
 	/***/ },
-	/* 285 */
+	/* 283 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getMapData = __webpack_require__(286);
+		var getMapData = __webpack_require__(284);
 
 		/**
 		 * Removes `key` and its value from the map.
@@ -98346,10 +97553,10 @@
 
 
 	/***/ },
-	/* 286 */
+	/* 284 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isKeyable = __webpack_require__(287);
+		var isKeyable = __webpack_require__(285);
 
 		/**
 		 * Gets the data for `map`.
@@ -98370,7 +97577,7 @@
 
 
 	/***/ },
-	/* 287 */
+	/* 285 */
 	/***/ function(module, exports) {
 
 		/**
@@ -98391,10 +97598,10 @@
 
 
 	/***/ },
-	/* 288 */
+	/* 286 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getMapData = __webpack_require__(286);
+		var getMapData = __webpack_require__(284);
 
 		/**
 		 * Gets the map value for `key`.
@@ -98413,10 +97620,10 @@
 
 
 	/***/ },
-	/* 289 */
+	/* 287 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getMapData = __webpack_require__(286);
+		var getMapData = __webpack_require__(284);
 
 		/**
 		 * Checks if a map value for `key` exists.
@@ -98435,10 +97642,10 @@
 
 
 	/***/ },
-	/* 290 */
+	/* 288 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getMapData = __webpack_require__(286);
+		var getMapData = __webpack_require__(284);
 
 		/**
 		 * Sets the map `key` to `value`.
@@ -98463,11 +97670,11 @@
 
 
 	/***/ },
-	/* 291 */
+	/* 289 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var copyObject = __webpack_require__(239),
-		    keysIn = __webpack_require__(292);
+		var copyObject = __webpack_require__(237),
+		    keysIn = __webpack_require__(290);
 
 		/**
 		 * The base implementation of `_.assignIn` without support for multiple sources
@@ -98486,12 +97693,12 @@
 
 
 	/***/ },
-	/* 292 */
+	/* 290 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayLikeKeys = __webpack_require__(244),
-		    baseKeysIn = __webpack_require__(293),
-		    isArrayLike = __webpack_require__(259);
+		var arrayLikeKeys = __webpack_require__(242),
+		    baseKeysIn = __webpack_require__(291),
+		    isArrayLike = __webpack_require__(257);
 
 		/**
 		 * Creates an array of the own and inherited enumerable property names of `object`.
@@ -98524,12 +97731,12 @@
 
 
 	/***/ },
-	/* 293 */
+	/* 291 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isObject = __webpack_require__(184),
-		    isPrototype = __webpack_require__(256),
-		    nativeKeysIn = __webpack_require__(294);
+		var isObject = __webpack_require__(182),
+		    isPrototype = __webpack_require__(254),
+		    nativeKeysIn = __webpack_require__(292);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -98563,7 +97770,7 @@
 
 
 	/***/ },
-	/* 294 */
+	/* 292 */
 	/***/ function(module, exports) {
 
 		/**
@@ -98589,10 +97796,10 @@
 
 
 	/***/ },
-	/* 295 */
+	/* 293 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		/* WEBPACK VAR INJECTION */(function(module) {var root = __webpack_require__(180);
+		/* WEBPACK VAR INJECTION */(function(module) {var root = __webpack_require__(178);
 
 		/** Detect free variable `exports`. */
 		var freeExports = typeof exports == 'object' && exports && !exports.nodeType && exports;
@@ -98628,14 +97835,14 @@
 
 		module.exports = cloneBuffer;
 
-		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(39)(module)))
+		/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(37)(module)))
 
 	/***/ },
-	/* 296 */
+	/* 294 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var copyObject = __webpack_require__(239),
-		    getSymbols = __webpack_require__(297);
+		var copyObject = __webpack_require__(237),
+		    getSymbols = __webpack_require__(295);
 
 		/**
 		 * Copies own symbols of `source` to `object`.
@@ -98653,11 +97860,11 @@
 
 
 	/***/ },
-	/* 297 */
+	/* 295 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayFilter = __webpack_require__(298),
-		    stubArray = __webpack_require__(299);
+		var arrayFilter = __webpack_require__(296),
+		    stubArray = __webpack_require__(297);
 
 		/** Used for built-in method references. */
 		var objectProto = Object.prototype;
@@ -98689,7 +97896,7 @@
 
 
 	/***/ },
-	/* 298 */
+	/* 296 */
 	/***/ function(module, exports) {
 
 		/**
@@ -98720,7 +97927,7 @@
 
 
 	/***/ },
-	/* 299 */
+	/* 297 */
 	/***/ function(module, exports) {
 
 		/**
@@ -98749,11 +97956,11 @@
 
 
 	/***/ },
-	/* 300 */
+	/* 298 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var copyObject = __webpack_require__(239),
-		    getSymbolsIn = __webpack_require__(301);
+		var copyObject = __webpack_require__(237),
+		    getSymbolsIn = __webpack_require__(299);
 
 		/**
 		 * Copies own and inherited symbols of `source` to `object`.
@@ -98771,13 +97978,13 @@
 
 
 	/***/ },
-	/* 301 */
+	/* 299 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayPush = __webpack_require__(302),
-		    getPrototype = __webpack_require__(303),
-		    getSymbols = __webpack_require__(297),
-		    stubArray = __webpack_require__(299);
+		var arrayPush = __webpack_require__(300),
+		    getPrototype = __webpack_require__(301),
+		    getSymbols = __webpack_require__(295),
+		    stubArray = __webpack_require__(297);
 
 		/* Built-in method references for those with the same name as other `lodash` methods. */
 		var nativeGetSymbols = Object.getOwnPropertySymbols;
@@ -98802,7 +98009,7 @@
 
 
 	/***/ },
-	/* 302 */
+	/* 300 */
 	/***/ function(module, exports) {
 
 		/**
@@ -98828,10 +98035,10 @@
 
 
 	/***/ },
-	/* 303 */
+	/* 301 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var overArg = __webpack_require__(258);
+		var overArg = __webpack_require__(256);
 
 		/** Built-in value references. */
 		var getPrototype = overArg(Object.getPrototypeOf, Object);
@@ -98840,12 +98047,12 @@
 
 
 	/***/ },
-	/* 304 */
+	/* 302 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGetAllKeys = __webpack_require__(305),
-		    getSymbols = __webpack_require__(297),
-		    keys = __webpack_require__(243);
+		var baseGetAllKeys = __webpack_require__(303),
+		    getSymbols = __webpack_require__(295),
+		    keys = __webpack_require__(241);
 
 		/**
 		 * Creates an array of own enumerable property names and symbols of `object`.
@@ -98862,11 +98069,11 @@
 
 
 	/***/ },
-	/* 305 */
+	/* 303 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayPush = __webpack_require__(302),
-		    isArray = __webpack_require__(208);
+		var arrayPush = __webpack_require__(300),
+		    isArray = __webpack_require__(206);
 
 		/**
 		 * The base implementation of `getAllKeys` and `getAllKeysIn` which uses
@@ -98888,12 +98095,12 @@
 
 
 	/***/ },
-	/* 306 */
+	/* 304 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGetAllKeys = __webpack_require__(305),
-		    getSymbolsIn = __webpack_require__(301),
-		    keysIn = __webpack_require__(292);
+		var baseGetAllKeys = __webpack_require__(303),
+		    getSymbolsIn = __webpack_require__(299),
+		    keysIn = __webpack_require__(290);
 
 		/**
 		 * Creates an array of own and inherited enumerable property names and
@@ -98911,16 +98118,16 @@
 
 
 	/***/ },
-	/* 307 */
+	/* 305 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var DataView = __webpack_require__(308),
-		    Map = __webpack_require__(275),
-		    Promise = __webpack_require__(309),
-		    Set = __webpack_require__(310),
-		    WeakMap = __webpack_require__(174),
-		    baseGetTag = __webpack_require__(178),
-		    toSource = __webpack_require__(187);
+		var DataView = __webpack_require__(306),
+		    Map = __webpack_require__(273),
+		    Promise = __webpack_require__(307),
+		    Set = __webpack_require__(308),
+		    WeakMap = __webpack_require__(172),
+		    baseGetTag = __webpack_require__(176),
+		    toSource = __webpack_require__(185);
 
 		/** `Object#toString` result references. */
 		var mapTag = '[object Map]',
@@ -98975,11 +98182,11 @@
 
 
 	/***/ },
-	/* 308 */
+	/* 306 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getNative = __webpack_require__(175),
-		    root = __webpack_require__(180);
+		var getNative = __webpack_require__(173),
+		    root = __webpack_require__(178);
 
 		/* Built-in method references that are verified to be native. */
 		var DataView = getNative(root, 'DataView');
@@ -98988,11 +98195,11 @@
 
 
 	/***/ },
-	/* 309 */
+	/* 307 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getNative = __webpack_require__(175),
-		    root = __webpack_require__(180);
+		var getNative = __webpack_require__(173),
+		    root = __webpack_require__(178);
 
 		/* Built-in method references that are verified to be native. */
 		var Promise = getNative(root, 'Promise');
@@ -99001,11 +98208,11 @@
 
 
 	/***/ },
-	/* 310 */
+	/* 308 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getNative = __webpack_require__(175),
-		    root = __webpack_require__(180);
+		var getNative = __webpack_require__(173),
+		    root = __webpack_require__(178);
 
 		/* Built-in method references that are verified to be native. */
 		var Set = getNative(root, 'Set');
@@ -99014,7 +98221,7 @@
 
 
 	/***/ },
-	/* 311 */
+	/* 309 */
 	/***/ function(module, exports) {
 
 		/** Used for built-in method references. */
@@ -99046,16 +98253,16 @@
 
 
 	/***/ },
-	/* 312 */
+	/* 310 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var cloneArrayBuffer = __webpack_require__(313),
-		    cloneDataView = __webpack_require__(315),
-		    cloneMap = __webpack_require__(316),
-		    cloneRegExp = __webpack_require__(320),
-		    cloneSet = __webpack_require__(321),
-		    cloneSymbol = __webpack_require__(324),
-		    cloneTypedArray = __webpack_require__(325);
+		var cloneArrayBuffer = __webpack_require__(311),
+		    cloneDataView = __webpack_require__(313),
+		    cloneMap = __webpack_require__(314),
+		    cloneRegExp = __webpack_require__(318),
+		    cloneSet = __webpack_require__(319),
+		    cloneSymbol = __webpack_require__(322),
+		    cloneTypedArray = __webpack_require__(323);
 
 		/** `Object#toString` result references. */
 		var boolTag = '[object Boolean]',
@@ -99132,10 +98339,10 @@
 
 
 	/***/ },
-	/* 313 */
+	/* 311 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Uint8Array = __webpack_require__(314);
+		var Uint8Array = __webpack_require__(312);
 
 		/**
 		 * Creates a clone of `arrayBuffer`.
@@ -99154,10 +98361,10 @@
 
 
 	/***/ },
-	/* 314 */
+	/* 312 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var root = __webpack_require__(180);
+		var root = __webpack_require__(178);
 
 		/** Built-in value references. */
 		var Uint8Array = root.Uint8Array;
@@ -99166,10 +98373,10 @@
 
 
 	/***/ },
-	/* 315 */
+	/* 313 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var cloneArrayBuffer = __webpack_require__(313);
+		var cloneArrayBuffer = __webpack_require__(311);
 
 		/**
 		 * Creates a clone of `dataView`.
@@ -99188,12 +98395,12 @@
 
 
 	/***/ },
-	/* 316 */
+	/* 314 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var addMapEntry = __webpack_require__(317),
-		    arrayReduce = __webpack_require__(318),
-		    mapToArray = __webpack_require__(319);
+		var addMapEntry = __webpack_require__(315),
+		    arrayReduce = __webpack_require__(316),
+		    mapToArray = __webpack_require__(317);
 
 		/** Used to compose bitmasks for cloning. */
 		var CLONE_DEEP_FLAG = 1;
@@ -99216,7 +98423,7 @@
 
 
 	/***/ },
-	/* 317 */
+	/* 315 */
 	/***/ function(module, exports) {
 
 		/**
@@ -99237,7 +98444,7 @@
 
 
 	/***/ },
-	/* 318 */
+	/* 316 */
 	/***/ function(module, exports) {
 
 		/**
@@ -99269,7 +98476,7 @@
 
 
 	/***/ },
-	/* 319 */
+	/* 317 */
 	/***/ function(module, exports) {
 
 		/**
@@ -99293,7 +98500,7 @@
 
 
 	/***/ },
-	/* 320 */
+	/* 318 */
 	/***/ function(module, exports) {
 
 		/** Used to match `RegExp` flags from their coerced string values. */
@@ -99316,12 +98523,12 @@
 
 
 	/***/ },
-	/* 321 */
+	/* 319 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var addSetEntry = __webpack_require__(322),
-		    arrayReduce = __webpack_require__(318),
-		    setToArray = __webpack_require__(323);
+		var addSetEntry = __webpack_require__(320),
+		    arrayReduce = __webpack_require__(316),
+		    setToArray = __webpack_require__(321);
 
 		/** Used to compose bitmasks for cloning. */
 		var CLONE_DEEP_FLAG = 1;
@@ -99344,7 +98551,7 @@
 
 
 	/***/ },
-	/* 322 */
+	/* 320 */
 	/***/ function(module, exports) {
 
 		/**
@@ -99365,7 +98572,7 @@
 
 
 	/***/ },
-	/* 323 */
+	/* 321 */
 	/***/ function(module, exports) {
 
 		/**
@@ -99389,10 +98596,10 @@
 
 
 	/***/ },
-	/* 324 */
+	/* 322 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Symbol = __webpack_require__(179);
+		var Symbol = __webpack_require__(177);
 
 		/** Used to convert symbols to primitives and strings. */
 		var symbolProto = Symbol ? Symbol.prototype : undefined,
@@ -99413,10 +98620,10 @@
 
 
 	/***/ },
-	/* 325 */
+	/* 323 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var cloneArrayBuffer = __webpack_require__(313);
+		var cloneArrayBuffer = __webpack_require__(311);
 
 		/**
 		 * Creates a clone of `typedArray`.
@@ -99435,12 +98642,12 @@
 
 
 	/***/ },
-	/* 326 */
+	/* 324 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseCreate = __webpack_require__(191),
-		    getPrototype = __webpack_require__(303),
-		    isPrototype = __webpack_require__(256);
+		var baseCreate = __webpack_require__(189),
+		    getPrototype = __webpack_require__(301),
+		    isPrototype = __webpack_require__(254);
 
 		/**
 		 * Initializes an object clone.
@@ -99459,10 +98666,10 @@
 
 
 	/***/ },
-	/* 327 */
+	/* 325 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var createWrap = __webpack_require__(170);
+		var createWrap = __webpack_require__(168);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_CURRY_FLAG = 8;
@@ -99522,11 +98729,11 @@
 
 
 	/***/ },
-	/* 328 */
+	/* 326 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseClone = __webpack_require__(261),
-		    baseIteratee = __webpack_require__(329);
+		var baseClone = __webpack_require__(259),
+		    baseIteratee = __webpack_require__(327);
 
 		/** Used to compose bitmasks for cloning. */
 		var CLONE_DEEP_FLAG = 1;
@@ -99581,14 +98788,14 @@
 
 
 	/***/ },
-	/* 329 */
+	/* 327 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseMatches = __webpack_require__(330),
-		    baseMatchesProperty = __webpack_require__(345),
-		    identity = __webpack_require__(172),
-		    isArray = __webpack_require__(208),
-		    property = __webpack_require__(360);
+		var baseMatches = __webpack_require__(328),
+		    baseMatchesProperty = __webpack_require__(343),
+		    identity = __webpack_require__(170),
+		    isArray = __webpack_require__(206),
+		    property = __webpack_require__(358);
 
 		/**
 		 * The base implementation of `_.iteratee`.
@@ -99618,12 +98825,12 @@
 
 
 	/***/ },
-	/* 330 */
+	/* 328 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseIsMatch = __webpack_require__(331),
-		    getMatchData = __webpack_require__(342),
-		    matchesStrictComparable = __webpack_require__(344);
+		var baseIsMatch = __webpack_require__(329),
+		    getMatchData = __webpack_require__(340),
+		    matchesStrictComparable = __webpack_require__(342);
 
 		/**
 		 * The base implementation of `_.matches` which doesn't clone `source`.
@@ -99646,11 +98853,11 @@
 
 
 	/***/ },
-	/* 331 */
+	/* 329 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Stack = __webpack_require__(262),
-		    baseIsEqual = __webpack_require__(332);
+		var Stack = __webpack_require__(260),
+		    baseIsEqual = __webpack_require__(330);
 
 		/** Used to compose bitmasks for value comparisons. */
 		var COMPARE_PARTIAL_FLAG = 1,
@@ -99714,11 +98921,11 @@
 
 
 	/***/ },
-	/* 332 */
+	/* 330 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseIsEqualDeep = __webpack_require__(333),
-		    isObjectLike = __webpack_require__(209);
+		var baseIsEqualDeep = __webpack_require__(331),
+		    isObjectLike = __webpack_require__(207);
 
 		/**
 		 * The base implementation of `_.isEqual` which supports partial comparisons
@@ -99748,17 +98955,17 @@
 
 
 	/***/ },
-	/* 333 */
+	/* 331 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Stack = __webpack_require__(262),
-		    equalArrays = __webpack_require__(334),
-		    equalByTag = __webpack_require__(340),
-		    equalObjects = __webpack_require__(341),
-		    getTag = __webpack_require__(307),
-		    isArray = __webpack_require__(208),
-		    isBuffer = __webpack_require__(248),
-		    isTypedArray = __webpack_require__(250);
+		var Stack = __webpack_require__(260),
+		    equalArrays = __webpack_require__(332),
+		    equalByTag = __webpack_require__(338),
+		    equalObjects = __webpack_require__(339),
+		    getTag = __webpack_require__(305),
+		    isArray = __webpack_require__(206),
+		    isBuffer = __webpack_require__(246),
+		    isTypedArray = __webpack_require__(248);
 
 		/** Used to compose bitmasks for value comparisons. */
 		var COMPARE_PARTIAL_FLAG = 1;
@@ -99837,12 +99044,12 @@
 
 
 	/***/ },
-	/* 334 */
+	/* 332 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var SetCache = __webpack_require__(335),
-		    arraySome = __webpack_require__(338),
-		    cacheHas = __webpack_require__(339);
+		var SetCache = __webpack_require__(333),
+		    arraySome = __webpack_require__(336),
+		    cacheHas = __webpack_require__(337);
 
 		/** Used to compose bitmasks for value comparisons. */
 		var COMPARE_PARTIAL_FLAG = 1,
@@ -99926,12 +99133,12 @@
 
 
 	/***/ },
-	/* 335 */
+	/* 333 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var MapCache = __webpack_require__(276),
-		    setCacheAdd = __webpack_require__(336),
-		    setCacheHas = __webpack_require__(337);
+		var MapCache = __webpack_require__(274),
+		    setCacheAdd = __webpack_require__(334),
+		    setCacheHas = __webpack_require__(335);
 
 		/**
 		 *
@@ -99959,7 +99166,7 @@
 
 
 	/***/ },
-	/* 336 */
+	/* 334 */
 	/***/ function(module, exports) {
 
 		/** Used to stand-in for `undefined` hash values. */
@@ -99984,7 +99191,7 @@
 
 
 	/***/ },
-	/* 337 */
+	/* 335 */
 	/***/ function(module, exports) {
 
 		/**
@@ -100004,7 +99211,7 @@
 
 
 	/***/ },
-	/* 338 */
+	/* 336 */
 	/***/ function(module, exports) {
 
 		/**
@@ -100033,7 +99240,7 @@
 
 
 	/***/ },
-	/* 339 */
+	/* 337 */
 	/***/ function(module, exports) {
 
 		/**
@@ -100052,15 +99259,15 @@
 
 
 	/***/ },
-	/* 340 */
+	/* 338 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Symbol = __webpack_require__(179),
-		    Uint8Array = __webpack_require__(314),
-		    eq = __webpack_require__(242),
-		    equalArrays = __webpack_require__(334),
-		    mapToArray = __webpack_require__(319),
-		    setToArray = __webpack_require__(323);
+		var Symbol = __webpack_require__(177),
+		    Uint8Array = __webpack_require__(312),
+		    eq = __webpack_require__(240),
+		    equalArrays = __webpack_require__(332),
+		    mapToArray = __webpack_require__(317),
+		    setToArray = __webpack_require__(321);
 
 		/** Used to compose bitmasks for value comparisons. */
 		var COMPARE_PARTIAL_FLAG = 1,
@@ -100170,10 +99377,10 @@
 
 
 	/***/ },
-	/* 341 */
+	/* 339 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var getAllKeys = __webpack_require__(304);
+		var getAllKeys = __webpack_require__(302);
 
 		/** Used to compose bitmasks for value comparisons. */
 		var COMPARE_PARTIAL_FLAG = 1;
@@ -100265,11 +99472,11 @@
 
 
 	/***/ },
-	/* 342 */
+	/* 340 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isStrictComparable = __webpack_require__(343),
-		    keys = __webpack_require__(243);
+		var isStrictComparable = __webpack_require__(341),
+		    keys = __webpack_require__(241);
 
 		/**
 		 * Gets the property names, values, and compare flags of `object`.
@@ -100295,10 +99502,10 @@
 
 
 	/***/ },
-	/* 343 */
+	/* 341 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isObject = __webpack_require__(184);
+		var isObject = __webpack_require__(182);
 
 		/**
 		 * Checks if `value` is suitable for strict equality comparisons, i.e. `===`.
@@ -100316,7 +99523,7 @@
 
 
 	/***/ },
-	/* 344 */
+	/* 342 */
 	/***/ function(module, exports) {
 
 		/**
@@ -100342,16 +99549,16 @@
 
 
 	/***/ },
-	/* 345 */
+	/* 343 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseIsEqual = __webpack_require__(332),
-		    get = __webpack_require__(346),
-		    hasIn = __webpack_require__(357),
-		    isKey = __webpack_require__(349),
-		    isStrictComparable = __webpack_require__(343),
-		    matchesStrictComparable = __webpack_require__(344),
-		    toKey = __webpack_require__(356);
+		var baseIsEqual = __webpack_require__(330),
+		    get = __webpack_require__(344),
+		    hasIn = __webpack_require__(355),
+		    isKey = __webpack_require__(347),
+		    isStrictComparable = __webpack_require__(341),
+		    matchesStrictComparable = __webpack_require__(342),
+		    toKey = __webpack_require__(354);
 
 		/** Used to compose bitmasks for value comparisons. */
 		var COMPARE_PARTIAL_FLAG = 1,
@@ -100381,10 +99588,10 @@
 
 
 	/***/ },
-	/* 346 */
+	/* 344 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGet = __webpack_require__(347);
+		var baseGet = __webpack_require__(345);
 
 		/**
 		 * Gets the value at `path` of `object`. If the resolved value is
@@ -100420,11 +99627,11 @@
 
 
 	/***/ },
-	/* 347 */
+	/* 345 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var castPath = __webpack_require__(348),
-		    toKey = __webpack_require__(356);
+		var castPath = __webpack_require__(346),
+		    toKey = __webpack_require__(354);
 
 		/**
 		 * The base implementation of `_.get` without support for default values.
@@ -100450,13 +99657,13 @@
 
 
 	/***/ },
-	/* 348 */
+	/* 346 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isArray = __webpack_require__(208),
-		    isKey = __webpack_require__(349),
-		    stringToPath = __webpack_require__(350),
-		    toString = __webpack_require__(353);
+		var isArray = __webpack_require__(206),
+		    isKey = __webpack_require__(347),
+		    stringToPath = __webpack_require__(348),
+		    toString = __webpack_require__(351);
 
 		/**
 		 * Casts `value` to a path array if it's not one.
@@ -100477,11 +99684,11 @@
 
 
 	/***/ },
-	/* 349 */
+	/* 347 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isArray = __webpack_require__(208),
-		    isSymbol = __webpack_require__(237);
+		var isArray = __webpack_require__(206),
+		    isSymbol = __webpack_require__(235);
 
 		/** Used to match property names within property paths. */
 		var reIsDeepProp = /\.|\[(?:[^[\]]*|(["'])(?:(?!\1)[^\\]|\\.)*?\1)\]/,
@@ -100512,10 +99719,10 @@
 
 
 	/***/ },
-	/* 350 */
+	/* 348 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var memoizeCapped = __webpack_require__(351);
+		var memoizeCapped = __webpack_require__(349);
 
 		/** Used to match property names within property paths. */
 		var reLeadingDot = /^\./,
@@ -100546,10 +99753,10 @@
 
 
 	/***/ },
-	/* 351 */
+	/* 349 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var memoize = __webpack_require__(352);
+		var memoize = __webpack_require__(350);
 
 		/** Used as the maximum memoize cache size. */
 		var MAX_MEMOIZE_SIZE = 500;
@@ -100578,10 +99785,10 @@
 
 
 	/***/ },
-	/* 352 */
+	/* 350 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var MapCache = __webpack_require__(276);
+		var MapCache = __webpack_require__(274);
 
 		/** Error message constants. */
 		var FUNC_ERROR_TEXT = 'Expected a function';
@@ -100657,10 +99864,10 @@
 
 
 	/***/ },
-	/* 353 */
+	/* 351 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseToString = __webpack_require__(354);
+		var baseToString = __webpack_require__(352);
 
 		/**
 		 * Converts `value` to a string. An empty string is returned for `null`
@@ -100691,13 +99898,13 @@
 
 
 	/***/ },
-	/* 354 */
+	/* 352 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Symbol = __webpack_require__(179),
-		    arrayMap = __webpack_require__(355),
-		    isArray = __webpack_require__(208),
-		    isSymbol = __webpack_require__(237);
+		var Symbol = __webpack_require__(177),
+		    arrayMap = __webpack_require__(353),
+		    isArray = __webpack_require__(206),
+		    isSymbol = __webpack_require__(235);
 
 		/** Used as references for various `Number` constants. */
 		var INFINITY = 1 / 0;
@@ -100734,7 +99941,7 @@
 
 
 	/***/ },
-	/* 355 */
+	/* 353 */
 	/***/ function(module, exports) {
 
 		/**
@@ -100761,10 +99968,10 @@
 
 
 	/***/ },
-	/* 356 */
+	/* 354 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isSymbol = __webpack_require__(237);
+		var isSymbol = __webpack_require__(235);
 
 		/** Used as references for various `Number` constants. */
 		var INFINITY = 1 / 0;
@@ -100788,11 +99995,11 @@
 
 
 	/***/ },
-	/* 357 */
+	/* 355 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseHasIn = __webpack_require__(358),
-		    hasPath = __webpack_require__(359);
+		var baseHasIn = __webpack_require__(356),
+		    hasPath = __webpack_require__(357);
 
 		/**
 		 * Checks if `path` is a direct or inherited property of `object`.
@@ -100828,7 +100035,7 @@
 
 
 	/***/ },
-	/* 358 */
+	/* 356 */
 	/***/ function(module, exports) {
 
 		/**
@@ -100847,15 +100054,15 @@
 
 
 	/***/ },
-	/* 359 */
+	/* 357 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var castPath = __webpack_require__(348),
-		    isArguments = __webpack_require__(246),
-		    isArray = __webpack_require__(208),
-		    isIndex = __webpack_require__(230),
-		    isLength = __webpack_require__(252),
-		    toKey = __webpack_require__(356);
+		var castPath = __webpack_require__(346),
+		    isArguments = __webpack_require__(244),
+		    isArray = __webpack_require__(206),
+		    isIndex = __webpack_require__(228),
+		    isLength = __webpack_require__(250),
+		    toKey = __webpack_require__(354);
 
 		/**
 		 * Checks if `path` exists on `object`.
@@ -100892,13 +100099,13 @@
 
 
 	/***/ },
-	/* 360 */
+	/* 358 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseProperty = __webpack_require__(361),
-		    basePropertyDeep = __webpack_require__(362),
-		    isKey = __webpack_require__(349),
-		    toKey = __webpack_require__(356);
+		var baseProperty = __webpack_require__(359),
+		    basePropertyDeep = __webpack_require__(360),
+		    isKey = __webpack_require__(347),
+		    toKey = __webpack_require__(354);
 
 		/**
 		 * Creates a function that returns the value at `path` of a given object.
@@ -100930,7 +100137,7 @@
 
 
 	/***/ },
-	/* 361 */
+	/* 359 */
 	/***/ function(module, exports) {
 
 		/**
@@ -100950,10 +100157,10 @@
 
 
 	/***/ },
-	/* 362 */
+	/* 360 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGet = __webpack_require__(347);
+		var baseGet = __webpack_require__(345);
 
 		/**
 		 * A specialized version of `baseProperty` which supports deep paths.
@@ -100972,11 +100179,11 @@
 
 
 	/***/ },
-	/* 363 */
+	/* 361 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var createWrap = __webpack_require__(170),
-		    flatRest = __webpack_require__(364);
+		var createWrap = __webpack_require__(168),
+		    flatRest = __webpack_require__(362);
 
 		/** Used to compose bitmasks for function metadata. */
 		var WRAP_REARG_FLAG = 256;
@@ -101011,12 +100218,12 @@
 
 
 	/***/ },
-	/* 364 */
+	/* 362 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var flatten = __webpack_require__(365),
-		    overRest = __webpack_require__(368),
-		    setToString = __webpack_require__(217);
+		var flatten = __webpack_require__(363),
+		    overRest = __webpack_require__(366),
+		    setToString = __webpack_require__(215);
 
 		/**
 		 * A specialized version of `baseRest` which flattens the rest array.
@@ -101033,10 +100240,10 @@
 
 
 	/***/ },
-	/* 365 */
+	/* 363 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseFlatten = __webpack_require__(366);
+		var baseFlatten = __webpack_require__(364);
 
 		/**
 		 * Flattens `array` a single level deep.
@@ -101061,11 +100268,11 @@
 
 
 	/***/ },
-	/* 366 */
+	/* 364 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayPush = __webpack_require__(302),
-		    isFlattenable = __webpack_require__(367);
+		var arrayPush = __webpack_require__(300),
+		    isFlattenable = __webpack_require__(365);
 
 		/**
 		 * The base implementation of `_.flatten` with support for restricting flattening.
@@ -101105,12 +100312,12 @@
 
 
 	/***/ },
-	/* 367 */
+	/* 365 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Symbol = __webpack_require__(179),
-		    isArguments = __webpack_require__(246),
-		    isArray = __webpack_require__(208);
+		var Symbol = __webpack_require__(177),
+		    isArguments = __webpack_require__(244),
+		    isArray = __webpack_require__(206);
 
 		/** Built-in value references. */
 		var spreadableSymbol = Symbol ? Symbol.isConcatSpreadable : undefined;
@@ -101131,10 +100338,10 @@
 
 
 	/***/ },
-	/* 368 */
+	/* 366 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var apply = __webpack_require__(193);
+		var apply = __webpack_require__(191);
 
 		/* Built-in method references for those with the same name as other `lodash` methods. */
 		var nativeMax = Math.max;
@@ -101173,16 +100380,16 @@
 
 
 	/***/ },
-	/* 369 */
+	/* 367 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var arrayMap = __webpack_require__(355),
-		    copyArray = __webpack_require__(211),
-		    isArray = __webpack_require__(208),
-		    isSymbol = __webpack_require__(237),
-		    stringToPath = __webpack_require__(350),
-		    toKey = __webpack_require__(356),
-		    toString = __webpack_require__(353);
+		var arrayMap = __webpack_require__(353),
+		    copyArray = __webpack_require__(209),
+		    isArray = __webpack_require__(206),
+		    isSymbol = __webpack_require__(235),
+		    stringToPath = __webpack_require__(348),
+		    toKey = __webpack_require__(354),
+		    toString = __webpack_require__(351);
 
 		/**
 		 * Converts `value` to a property path array.
@@ -101212,11 +100419,11 @@
 
 
 	/***/ },
-	/* 370 */
+	/* 368 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseMerge = __webpack_require__(371),
-		    createAssigner = __webpack_require__(379);
+		var baseMerge = __webpack_require__(369),
+		    createAssigner = __webpack_require__(377);
 
 		/**
 		 * This method is like `_.assign` except that it recursively merges own and
@@ -101257,15 +100464,15 @@
 
 
 	/***/ },
-	/* 371 */
+	/* 369 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var Stack = __webpack_require__(262),
-		    assignMergeValue = __webpack_require__(372),
-		    baseFor = __webpack_require__(373),
-		    baseMergeDeep = __webpack_require__(375),
-		    isObject = __webpack_require__(184),
-		    keysIn = __webpack_require__(292);
+		var Stack = __webpack_require__(260),
+		    assignMergeValue = __webpack_require__(370),
+		    baseFor = __webpack_require__(371),
+		    baseMergeDeep = __webpack_require__(373),
+		    isObject = __webpack_require__(182),
+		    keysIn = __webpack_require__(290);
 
 		/**
 		 * The base implementation of `_.merge` without support for multiple sources.
@@ -101304,11 +100511,11 @@
 
 
 	/***/ },
-	/* 372 */
+	/* 370 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseAssignValue = __webpack_require__(241),
-		    eq = __webpack_require__(242);
+		var baseAssignValue = __webpack_require__(239),
+		    eq = __webpack_require__(240);
 
 		/**
 		 * This function is like `assignValue` except that it doesn't assign
@@ -101330,10 +100537,10 @@
 
 
 	/***/ },
-	/* 373 */
+	/* 371 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var createBaseFor = __webpack_require__(374);
+		var createBaseFor = __webpack_require__(372);
 
 		/**
 		 * The base implementation of `baseForOwn` which iterates over `object`
@@ -101352,7 +100559,7 @@
 
 
 	/***/ },
-	/* 374 */
+	/* 372 */
 	/***/ function(module, exports) {
 
 		/**
@@ -101383,23 +100590,23 @@
 
 
 	/***/ },
-	/* 375 */
+	/* 373 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var assignMergeValue = __webpack_require__(372),
-		    cloneBuffer = __webpack_require__(295),
-		    cloneTypedArray = __webpack_require__(325),
-		    copyArray = __webpack_require__(211),
-		    initCloneObject = __webpack_require__(326),
-		    isArguments = __webpack_require__(246),
-		    isArray = __webpack_require__(208),
-		    isArrayLikeObject = __webpack_require__(376),
-		    isBuffer = __webpack_require__(248),
-		    isFunction = __webpack_require__(177),
-		    isObject = __webpack_require__(184),
-		    isPlainObject = __webpack_require__(377),
-		    isTypedArray = __webpack_require__(250),
-		    toPlainObject = __webpack_require__(378);
+		var assignMergeValue = __webpack_require__(370),
+		    cloneBuffer = __webpack_require__(293),
+		    cloneTypedArray = __webpack_require__(323),
+		    copyArray = __webpack_require__(209),
+		    initCloneObject = __webpack_require__(324),
+		    isArguments = __webpack_require__(244),
+		    isArray = __webpack_require__(206),
+		    isArrayLikeObject = __webpack_require__(374),
+		    isBuffer = __webpack_require__(246),
+		    isFunction = __webpack_require__(175),
+		    isObject = __webpack_require__(182),
+		    isPlainObject = __webpack_require__(375),
+		    isTypedArray = __webpack_require__(248),
+		    toPlainObject = __webpack_require__(376);
 
 		/**
 		 * A specialized version of `baseMerge` for arrays and objects which performs
@@ -101482,11 +100689,11 @@
 
 
 	/***/ },
-	/* 376 */
+	/* 374 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var isArrayLike = __webpack_require__(259),
-		    isObjectLike = __webpack_require__(209);
+		var isArrayLike = __webpack_require__(257),
+		    isObjectLike = __webpack_require__(207);
 
 		/**
 		 * This method is like `_.isArrayLike` except that it also checks if `value`
@@ -101521,12 +100728,12 @@
 
 
 	/***/ },
-	/* 377 */
+	/* 375 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseGetTag = __webpack_require__(178),
-		    getPrototype = __webpack_require__(303),
-		    isObjectLike = __webpack_require__(209);
+		var baseGetTag = __webpack_require__(176),
+		    getPrototype = __webpack_require__(301),
+		    isObjectLike = __webpack_require__(207);
 
 		/** `Object#toString` result references. */
 		var objectTag = '[object Object]';
@@ -101589,11 +100796,11 @@
 
 
 	/***/ },
-	/* 378 */
+	/* 376 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var copyObject = __webpack_require__(239),
-		    keysIn = __webpack_require__(292);
+		var copyObject = __webpack_require__(237),
+		    keysIn = __webpack_require__(290);
 
 		/**
 		 * Converts `value` to a plain object flattening inherited enumerable string
@@ -101627,11 +100834,11 @@
 
 
 	/***/ },
-	/* 379 */
+	/* 377 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var baseRest = __webpack_require__(380),
-		    isIterateeCall = __webpack_require__(381);
+		var baseRest = __webpack_require__(378),
+		    isIterateeCall = __webpack_require__(379);
 
 		/**
 		 * Creates a function like `_.assign`.
@@ -101670,12 +100877,12 @@
 
 
 	/***/ },
-	/* 380 */
+	/* 378 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var identity = __webpack_require__(172),
-		    overRest = __webpack_require__(368),
-		    setToString = __webpack_require__(217);
+		var identity = __webpack_require__(170),
+		    overRest = __webpack_require__(366),
+		    setToString = __webpack_require__(215);
 
 		/**
 		 * The base implementation of `_.rest` which doesn't validate or coerce arguments.
@@ -101693,13 +100900,13 @@
 
 
 	/***/ },
-	/* 381 */
+	/* 379 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var eq = __webpack_require__(242),
-		    isArrayLike = __webpack_require__(259),
-		    isIndex = __webpack_require__(230),
-		    isObject = __webpack_require__(184);
+		var eq = __webpack_require__(240),
+		    isArrayLike = __webpack_require__(257),
+		    isIndex = __webpack_require__(228),
+		    isObject = __webpack_require__(182);
 
 		/**
 		 * Checks if the given arguments are from an iteratee call.
@@ -101729,7 +100936,7 @@
 
 
 	/***/ },
-	/* 382 */
+	/* 380 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -101746,7 +100953,7 @@
 
 		var _chart2 = _interopRequireDefault(_chart);
 
-		var _options = __webpack_require__(162);
+		var _options = __webpack_require__(160);
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -101802,7 +101009,7 @@
 		});
 
 	/***/ },
-	/* 383 */
+	/* 381 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -101819,7 +101026,7 @@
 
 		var _chart2 = _interopRequireDefault(_chart);
 
-		var _options = __webpack_require__(162);
+		var _options = __webpack_require__(160);
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -101891,7 +101098,7 @@
 		});
 
 	/***/ },
-	/* 384 */
+	/* 382 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -101908,7 +101115,7 @@
 
 		var _chart2 = _interopRequireDefault(_chart);
 
-		var _options = __webpack_require__(162);
+		var _options = __webpack_require__(160);
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -101964,7 +101171,7 @@
 		});
 
 	/***/ },
-	/* 385 */
+	/* 383 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -101981,7 +101188,7 @@
 
 		var _chart2 = _interopRequireDefault(_chart);
 
-		var _options = __webpack_require__(162);
+		var _options = __webpack_require__(160);
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -102037,7 +101244,7 @@
 		});
 
 	/***/ },
-	/* 386 */
+	/* 384 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -102054,7 +101261,7 @@
 
 		var _chart2 = _interopRequireDefault(_chart);
 
-		var _options = __webpack_require__(162);
+		var _options = __webpack_require__(160);
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -102110,7 +101317,7 @@
 		});
 
 	/***/ },
-	/* 387 */
+	/* 385 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -102127,7 +101334,7 @@
 
 		var _chart2 = _interopRequireDefault(_chart);
 
-		var _options = __webpack_require__(162);
+		var _options = __webpack_require__(160);
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -102201,7 +101408,7 @@
 		});
 
 	/***/ },
-	/* 388 */
+	/* 386 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
@@ -102210,11 +101417,11 @@
 		  value: true
 		});
 
-		var _reactiveData = __webpack_require__(389);
+		var _reactiveData = __webpack_require__(387);
 
 		var _reactiveData2 = _interopRequireDefault(_reactiveData);
 
-		var _reactiveProp = __webpack_require__(393);
+		var _reactiveProp = __webpack_require__(391);
 
 		var _reactiveProp2 = _interopRequireDefault(_reactiveProp);
 
@@ -102226,12 +101433,12 @@
 		};
 
 	/***/ },
-	/* 389 */
+	/* 387 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
 
-		var _stringify = __webpack_require__(390);
+		var _stringify = __webpack_require__(388);
 
 		var _stringify2 = _interopRequireDefault(_stringify);
 
@@ -102247,71 +101454,71 @@
 		  watch: {
 		    'chartData': {
 		      handler: function handler(newData, oldData) {
-		        var _this = this;
-
 		        if (oldData) {
-		          (function () {
-		            var chart = _this._chart;
+		          var chart = this._chart;
 
-		            var newDatasetLabels = newData.datasets.map(function (dataset) {
-		              return dataset.label;
-		            });
+		          var newDataLabels = newData.datasets.map(function (dataset) {
+		            return dataset.label;
+		          });
 
-		            var oldDatasetLabels = oldData.datasets.map(function (dataset) {
-		              return dataset.label;
-		            });
+		          var oldDataLabels = oldData.datasets.map(function (dataset) {
+		            return dataset.label;
+		          });
 
-		            var oldLabels = (0, _stringify2.default)(oldDatasetLabels);
-		            var newLabels = (0, _stringify2.default)(newDatasetLabels);
-
-		            if (newLabels === oldLabels && oldData.datasets.length === newData.datasets.length) {
-		              newData.datasets.forEach(function (dataset, i) {
-		                chart.data.datasets[i] = dataset;
-		              });
-
-		              chart.data.labels = newData.labels;
-		              chart.update();
-		            } else {
-		              chart.destroy();
-		              _this.renderChart(_this.chartData, _this.options);
-		            }
-		          })();
+		          if ((0, _stringify2.default)(newDataLabels) === (0, _stringify2.default)(oldDataLabels)) {
+		            this.forceUpdate(newData, chart);
+		          } else {
+		            this.forceRender();
+		          }
 		        }
 		      }
+		    }
+		  },
+		  methods: {
+		    forceUpdate: function forceUpdate(newData, chart) {
+		      newData.datasets.forEach(function (dataset, i) {
+		        chart.data.datasets[i].data = dataset.data;
+		      });
+
+		      chart.data.labels = newData.labels;
+		      chart.update();
+		    },
+		    forceRender: function forceRender() {
+		      this.renderChart(this.chartData, this.options);
 		    }
 		  }
 		};
 
 	/***/ },
-	/* 390 */
+	/* 388 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		module.exports = { "default": __webpack_require__(391), __esModule: true };
+		module.exports = { "default": __webpack_require__(389), __esModule: true };
 
 	/***/ },
-	/* 391 */
+	/* 389 */
 	/***/ function(module, exports, __webpack_require__) {
 
-		var core  = __webpack_require__(392)
+		var core  = __webpack_require__(390)
 		  , $JSON = core.JSON || (core.JSON = {stringify: JSON.stringify});
 		module.exports = function stringify(it){ // eslint-disable-line no-unused-vars
 		  return $JSON.stringify.apply($JSON, arguments);
 		};
 
 	/***/ },
-	/* 392 */
+	/* 390 */
 	/***/ function(module, exports) {
 
 		var core = module.exports = {version: '2.4.0'};
 		if(typeof __e == 'number')__e = core; // eslint-disable-line no-undef
 
 	/***/ },
-	/* 393 */
+	/* 391 */
 	/***/ function(module, exports, __webpack_require__) {
 
 		'use strict';
 
-		var _stringify = __webpack_require__(390);
+		var _stringify = __webpack_require__(388);
 
 		var _stringify2 = _interopRequireDefault(_stringify);
 
@@ -102333,26 +101540,21 @@
 		          (function () {
 		            var chart = _this._chart;
 
-		            var newDatasetLabels = newData.datasets.map(function (dataset) {
+		            var newDataLabels = newData.datasets.map(function (dataset) {
 		              return dataset.label;
 		            });
 
-		            var oldDatasetLabels = oldData.datasets.map(function (dataset) {
+		            var oldDataLabels = oldData.datasets.map(function (dataset) {
 		              return dataset.label;
 		            });
 
-		            var oldLabels = (0, _stringify2.default)(oldDatasetLabels);
-		            var newLabels = (0, _stringify2.default)(newDatasetLabels);
-
-		            if (newLabels === oldLabels && oldData.datasets.length === newData.datasets.length) {
+		            if ((0, _stringify2.default)(newDataLabels) === (0, _stringify2.default)(oldDataLabels)) {
 		              newData.datasets.forEach(function (dataset, i) {
-		                chart.data.datasets[i] = dataset;
+		                chart.data.datasets[i].data = dataset.data;
 		              });
-
 		              chart.data.labels = newData.labels;
 		              chart.update();
 		            } else {
-		              chart.destroy();
 		              _this.renderChart(_this.chartData, _this.options);
 		            }
 		          })();
@@ -102368,7 +101570,7 @@
 	;
 
 /***/ },
-/* 566 */
+/* 563 */
 /***/ function(module, exports) {
 
 	/* This program is free software. It comes without any warranty, to
