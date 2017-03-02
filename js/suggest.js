@@ -242,11 +242,13 @@ var vue = new Vue({
       }
     },
     'suggestion.origin'() {
+      this.updateHash();
       this.updateSimilarRequests();
       this.updateRunningRoutes();
       this.updateCrowdstartedRoutes();
     },
     'suggestion.destination'() {
+      this.updateHash();
       this.updateSimilarRequests();
       this.updateRunningRoutes();
       this.updateCrowdstartedRoutes();
@@ -298,12 +300,14 @@ var vue = new Vue({
 
       this.$http.post('https://api.beeline.sg/suggestions/web', suggestionData)
       .then((success) => {
+        const hash = this.getHash();
+
         $('#submitted-dialog').modal('show')
           .on('hidden.bs.modal', () => {
             if (this.emailVerification) {
-              window.location.href = "suggestSubmitted.html"
+              window.location.href = "suggestSubmitted.html#" + hash
             } else {
-              window.location.href = "suggestVerify.html"
+              window.location.href = "suggestVerify.html#" + hash
             }
           });
 
@@ -373,6 +377,21 @@ var vue = new Vue({
         })
         .catch(err => console.error(err))
       }
+    },
+    updateHash() {
+      window.location.hash = this.getHash();
+    },
+    getHash() {
+      return querystring.stringify(_.assign({},
+        this.suggestion.origin ? {
+          originLat: this.suggestion.origin.lat(),
+          originLng: this.suggestion.origin.lng(),
+        } : {},
+        this.suggestion.destination ? {
+          destinationLat: this.suggestion.destination.lat(),
+          destinationLng: this.suggestion.destination.lng(),
+        } : {}
+      ));
     },
     departureTimeFor(route) {
       var tripStops = _.sortBy(route.trips[0].tripStops, ts => ts.time);
