@@ -47,7 +47,6 @@
   <script src="https://use.fontawesome.com/e1c177a50d.js"></script>
   <script src="js/wow.min.js"></script>
   <script src="js/landing.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.6.0/clipboard.min.js"></script>
 
   <!--Favicon-->
   <link rel="icon" type="image/png" href="images/favicon.png">
@@ -86,22 +85,6 @@
       <p>
         Thank you! Your suggestion has been submitted.
       </p>
-
-      <div id="share-link-section">
-        <hr/>
-        <p>
-          Share your suggestion:
-        </p>
-
-        <p class="form-inline">
-          <textarea class="form-control" type="text" id="suggestion-link"
-            v-model="shareLink"></textarea>
-          <button class="btn share-suggestion-button" data-clipboard-target="#suggestion-link">
-            <span class="glyphicon glyphicon-copy"></span>
-          </button>
-        </p>
-      </div>
-
       <p>
 
         <a href="/index.html" class="btn btn-primary back-to-home">Back to home</a>
@@ -142,7 +125,6 @@
     ga('create', 'UA-79537959-3', 'auto');
     ga('send', 'pageview');
   </script>
-  <script src="js/postSuggest.transpiled.js"></script>
 </body>
 
 </html>
