@@ -3,7 +3,7 @@ var path = require('path')
 // check env & config/index.js to decide weither to enable CSS Sourcemaps for the
 // various preprocessor loaders added to vue-loader at the end of this file
 
-module.exports = {
+const suggestPack = {
   entry: {
     app: [
       'babel-polyfill',
@@ -65,3 +65,20 @@ module.exports = {
     presets: ['es2015', 'stage-2']
   }
 }
+
+const postSuggestPack = Object.assign({},
+  suggestPack,
+  {
+    entry: {
+      app: [
+        'babel-polyfill',
+        './js/postSuggest.js'
+      ]
+    },
+    output: {
+      path: './www/js',
+      filename: 'postSuggest.transpiled.js'
+    }
+  });
+
+module.exports = [suggestPack, postSuggestPack]
